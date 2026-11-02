@@ -6,8 +6,6 @@
  *   - choosing "Not declared" or "Cannot read" greys out that field's
  *     inputs, since no value goes with those answers;
  *   - the assets total is recomputed as the two parts are typed;
- *   - editing a field ticks its "I checked this" box, because only ticked
- *     fields are saved and an edit left unticked would be silently lost;
  *   - the time left on the hold counts down.
  *
  * A plain bundled module imported from the page's own `<script>` tag, like
@@ -24,12 +22,16 @@ function startCountdown(): void {
   const template = el.dataset.minutesTemplate ?? '{minutes}';
   if (Number.isNaN(expires)) return;
   const tick = () => {
+    if (Date.now() >= expires) {
+      window.location.replace('/transcribe?expired=1');
+      return;
+    }
     const minutes = Math.max(0, Math.ceil((expires - Date.now()) / 60000));
     el.textContent = template.replace('{minutes}', String(minutes));
     el.toggleAttribute('data-ending', minutes <= 5);
   };
   tick();
-  window.setInterval(tick, 30000);
+  window.setInterval(tick, 1000);
 }
 
 export function initTranscribeForm(): void {
@@ -37,17 +39,11 @@ export function initTranscribeForm(): void {
   if (!form) return;
 
   form.querySelectorAll<HTMLFieldSetElement>('fieldset[data-field]').forEach((field) => {
-    const tick = field.querySelector<HTMLInputElement>('[data-tick]');
     syncStatus(field);
 
     field.addEventListener('change', (event) => {
       const target = event.target as HTMLElement;
       if (target instanceof HTMLInputElement && target.type === 'radio') syncStatus(field);
-      // Any answer the transcriber changes is one they have looked at.
-      if (tick && target !== tick) tick.checked = true;
-    });
-    field.addEventListener('input', (event) => {
-      if (tick && event.target !== tick && !(event.target instanceof HTMLInputElement && event.target.type === 'radio')) tick.checked = true;
     });
   });
 

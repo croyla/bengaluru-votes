@@ -131,7 +131,7 @@ async function draw(auth: Auth): Promise<number> {
 }
 
 /** The reading form as the screen pre-fills it, with overrides and ticks. */
-function readingForm(auth: Auth, e: AffidavitExtraction, overrides: Record<string, string>, checked: string[]): FormData {
+function readingForm(auth: Auth, e: AffidavitExtraction, overrides: Record<string, string>, confirmed = true): FormData {
   const fd = tokenForm(auth, {
     formAction: 'save',
     name: e.identity.name.text!,
@@ -153,7 +153,7 @@ function readingForm(auth: Auth, e: AffidavitExtraction, overrides: Record<strin
     'status.cases': 'value',
     ...overrides,
   });
-  for (const key of checked) fd.set(`checked.${key}`, 'on');
+  if (confirmed) fd.set('confirmChecked', 'on');
   return fd;
 }
 
@@ -258,8 +258,9 @@ describe('/transcribe/{assignment-id}', () => {
     expect(html).toMatch(/name="age"[^>]*value="52"/);
     expect(html).toMatch(/name="movableInr"[^>]*value="10210000"/);
     expect(html).toContain('IPC 420 and 468');
-    expect(html).toContain('name="checked.assets"');
-    expect(html).not.toMatch(/name="checked\.[a-z_]+"[^>]*checked/);
+    expect(html).toContain('name="confirmChecked"');
+    expect(html.match(/type="checkbox"/g)).toHaveLength(1);
+    expect(html).not.toMatch(/name="confirmChecked"[^>]*checked/);
     expect(html).not.toMatch(/name="wardId"/);
   });
 
@@ -274,12 +275,12 @@ describe('/transcribe/{assignment-id}', () => {
     expect((await reading(id, await person('admin'))).status).toBe(404);
   });
 
-  it('saves the ticked fields, and the public page then says a person checked them', async () => {
+  it('saves the whole confirmed form, and the public page then says a person checked them', async () => {
     const a = await published();
     const me = await person('transcriber');
     const id = await draw(me);
 
-    const res = await reading(id, me, readingForm(me, a.extraction, { age: '53' }, ['age', 'cases']));
+    const res = await reading(id, me, readingForm(me, a.extraction, { age: '53' }, true));
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('/transcribe?saved=1');
 
@@ -302,12 +303,12 @@ describe('/transcribe/{assignment-id}', () => {
     const a = await published();
     const me = await person('transcriber');
     const id = await draw(me);
-    const res = await reading(id, me, readingForm(me, a.extraction, { age: 'fifty', movableInr: '1,00,000' }, ['age', 'assets']));
+    const res = await reading(id, me, readingForm(me, a.extraction, { age: 'fifty', movableInr: '1,00,000' }, true));
     expect(res.status).toBe(400);
     const html = await res.text();
     expect(html).toMatch(/name="age"[^>]*value="fifty"/);
     expect(html).toMatch(/name="movableInr"[^>]*value="1,00,000"/);
-    expect(html).toMatch(/name="checked\.age"[^>]*checked/);
+    expect(html).toMatch(/name="confirmChecked"[^>]*checked/);
     expect(html).toContain('whole number');
     const [age] = await db
       .select()
@@ -316,12 +317,12 @@ describe('/transcribe/{assignment-id}', () => {
     expect(age).toMatchObject({ valueEn: '52', aiExtracted: true });
   });
 
-  it('asks for at least one tick', async () => {
+  it('requires the form-wide confirmation', async () => {
     const a = await published();
     const me = await person('transcriber');
-    const res = await reading(await draw(me), me, readingForm(me, a.extraction, {}, []));
+    const res = await reading(await draw(me), me, readingForm(me, a.extraction, {}, false));
     expect(res.status).toBe(400);
-    expect(await res.text()).toContain('Tick at least one field');
+    expect(await res.text()).toContain('Confirm that you checked the whole form');
   });
 
   it('sends a save that arrives after the hold expired back to the start, having written nothing', async () => {
@@ -329,7 +330,7 @@ describe('/transcribe/{assignment-id}', () => {
     const me = await person('transcriber');
     const id = await draw(me);
     await db.execute(sql`UPDATE transcription_assignments SET expires_at = now() - interval '1 minute' WHERE id = ${id}`);
-    const res = await reading(id, me, readingForm(me, a.extraction, { age: '53' }, ['age']));
+    const res = await reading(id, me, readingForm(me, a.extraction, { age: '53' }, true));
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toBe('/transcribe?expired=1');
   });

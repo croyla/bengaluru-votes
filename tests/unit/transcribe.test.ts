@@ -105,7 +105,7 @@ async function field(candidateId: number, key: string) {
 }
 
 /** The form a transcriber posts: every input pre-filled as the screen shows it, then the overrides. */
-function form(e: AffidavitExtraction, overrides: Record<string, string>, checked: string[]): FormData {
+function form(e: AffidavitExtraction, overrides: Record<string, string>, confirmed = true): FormData {
   const fd = new FormData();
   const base: Record<string, string> = {
     name: e.identity.name.text ?? '',
@@ -127,7 +127,7 @@ function form(e: AffidavitExtraction, overrides: Record<string, string>, checked
     'status.cases': e.cases.status,
   };
   for (const [k, v] of Object.entries({ ...base, ...overrides })) fd.set(k, v);
-  for (const key of checked) fd.set(`checked.${key}`, 'on');
+  if (confirmed) fd.set('confirmChecked', 'on');
   return fd;
 }
 
@@ -186,13 +186,13 @@ describe('drawAssignment', () => {
     expect(await affidavitOf((await drawAssignment(await user()))!)).toBe(ninety.affidavitId);
   });
 
-  it('sets a 45-minute hold', async () => {
+  it('sets a 10-minute hold', async () => {
     await published();
     const row = await assignment((await drawAssignment(await user()))!);
     expect(row.state).toBe('open');
     const minutes = (row.expiresAt.getTime() - row.drawnAt.getTime()) / 60000;
-    expect(ASSIGNMENT_MINUTES).toBe(45);
-    expect(Math.round(minutes)).toBe(45);
+    expect(ASSIGNMENT_MINUTES).toBe(10);
+    expect(Math.round(minutes)).toBe(10);
   });
 
   it('never gives two people the same affidavit, even when they ask together', async () => {
@@ -276,18 +276,18 @@ describe('loadAssignment', () => {
 });
 
 describe('submitAssignment', () => {
-  it('publishes the ticked fields as checked and leaves the rest AI-labelled', async () => {
+  it('publishes all confirmed fields as checked, including unchanged AI values', async () => {
     const a = await published();
     const me = await user();
     const id = (await drawAssignment(me))!;
 
-    const outcome = await submitAssignment(me, id, form(a.extraction, { age: '53', movableInr: '1,02,10,000' }, ['age', 'assets']));
+    const outcome = await submitAssignment(me, id, form(a.extraction, { age: '53', movableInr: '1,02,10,000' }, true));
     expect(outcome).toMatchObject({ kind: 'saved', candidateId: a.candidateId });
 
     expect(await field(a.candidateId, 'age')).toMatchObject({ valueEn: '53', aiExtracted: false, checkedBy: me, confirmedAi: false });
     expect(await field(a.candidateId, 'assets')).toMatchObject({ aiExtracted: false, checkedBy: me, confirmedAi: true });
     expect((await field(a.candidateId, 'assets')).valueEn).toContain('₹4,52,10,000');
-    expect(await field(a.candidateId, 'education')).toMatchObject({ aiExtracted: true, checkedBy: null });
+    expect(await field(a.candidateId, 'education')).toMatchObject({ aiExtracted: false, checkedBy: me, confirmedAi: true });
 
     expect((await assignment(id)).state).toBe('submitted');
     expect((await assignment(id)).closedAt).not.toBeNull();
@@ -301,7 +301,7 @@ describe('submitAssignment', () => {
     const a = await published();
     const me = await user();
     const id = (await drawAssignment(me))!;
-    await submitAssignment(me, id, form(a.extraction, { name: 'Corrected Name (FICTIONAL)' }, ['full_name']));
+    await submitAssignment(me, id, form(a.extraction, { name: 'Corrected Name (FICTIONAL)' }, true));
     const [c] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, a.candidateId));
     expect(c.nameEn).toBe('Corrected Name (FICTIONAL)');
     expect(await field(a.candidateId, 'full_name')).toMatchObject({ aiExtracted: false, confirmedAi: false });
@@ -311,18 +311,22 @@ describe('submitAssignment', () => {
     const a = await published();
     const me = await user();
     const id = (await drawAssignment(me))!;
-    await submitAssignment(me, id, form(a.extraction, { 'status.age': 'not_declared', 'status.assets': 'unreadable' }, ['age', 'assets']));
+    await submitAssignment(me, id, form(a.extraction, { 'status.age': 'not_declared', 'status.assets': 'unreadable' }, true));
     expect(await field(a.candidateId, 'age')).toMatchObject({ valueEn: null, notDeclared: true, aiExtracted: false, checkedBy: me });
     expect(await field(a.candidateId, 'assets')).toMatchObject({ valueEn: null, unreadable: true, aiExtracted: true, checkedBy: null });
   });
 
-  it('asks for at least one ticked field', async () => {
+  it('requires explicit form-wide confirmation', async () => {
     const a = await published();
     const me = await user();
     const id = (await drawAssignment(me))!;
-    const outcome = await submitAssignment(me, id, form(a.extraction, {}, []));
+    const outcome = await submitAssignment(me, id, form(a.extraction, {}, false));
     expect(outcome).toMatchObject({ kind: 'invalid', formError: 'nothing_checked' });
     expect((await assignment(id)).state).toBe('open');
+    const legacy = form(a.extraction, {}, false);
+    legacy.set('checked.age', 'on');
+    expect(await submitAssignment(me, id, legacy)).toMatchObject({ kind: 'invalid', formError: 'nothing_checked' });
+    expect(await field(a.candidateId, 'age')).toMatchObject({ aiExtracted: true, checkedBy: null });
   });
 
   it.each([
@@ -338,23 +342,23 @@ describe('submitAssignment', () => {
     const a = await published();
     const me = await user();
     const id = (await drawAssignment(me))!;
-    const outcome = await submitAssignment(me, id, form(a.extraction, overrides, ['age', 'assets', 'cases', 'full_name', 'education', 'gender']));
+    const outcome = await submitAssignment(me, id, form(a.extraction, overrides, true));
     expect(outcome.kind).toBe('invalid');
     if (outcome.kind !== 'invalid') return;
     expect(Object.keys(outcome.errors)).toEqual([key]);
     const [name, value] = Object.entries(overrides)[0];
     expect(outcome.raw.inputs[name]).toBe(value);
-    expect(outcome.raw.checked).toContain('age');
+    expect(outcome.raw.confirmed).toBe(true);
     expect(await field(a.candidateId, 'age')).toMatchObject({ aiExtracted: true, checkedBy: null });
     expect((await assignment(id)).state).toBe('open');
   });
 
-  it('ignores a bad value in a field that was not ticked', async () => {
+  it('validates every field in the confirmed form', async () => {
     const a = await published();
     const me = await user();
     const id = (await drawAssignment(me))!;
-    const outcome = await submitAssignment(me, id, form(a.extraction, { age: 'abc' }, ['cases']));
-    expect(outcome.kind).toBe('saved');
+    const outcome = await submitAssignment(me, id, form(a.extraction, { age: 'abc' }, true));
+    expect(outcome.kind).toBe('invalid');
     expect(await field(a.candidateId, 'age')).toMatchObject({ valueEn: '52', aiExtracted: true });
   });
 
@@ -363,7 +367,7 @@ describe('submitAssignment', () => {
     const me = await user();
     const id = (await drawAssignment(me))!;
     await db.execute(sql`UPDATE transcription_assignments SET expires_at = now() - interval '1 minute' WHERE id = ${id}`);
-    expect(await submitAssignment(me, id, form(a.extraction, { age: '53' }, ['age']))).toEqual({ kind: 'expired' });
+    expect(await submitAssignment(me, id, form(a.extraction, { age: '53' }, true))).toEqual({ kind: 'expired' });
     expect(await field(a.candidateId, 'age')).toMatchObject({ valueEn: '52', aiExtracted: true });
   });
 
@@ -371,11 +375,11 @@ describe('submitAssignment', () => {
     const a = await published();
     const me = await user();
     const id = (await drawAssignment(me))!;
-    expect(await submitAssignment(await user(), id, form(a.extraction, { age: '53' }, ['age']))).toEqual({ kind: 'expired' });
+    expect(await submitAssignment(await user(), id, form(a.extraction, { age: '53' }, true))).toEqual({ kind: 'expired' });
     expect(await field(a.candidateId, 'age')).toMatchObject({ valueEn: '52' });
 
-    expect((await submitAssignment(me, id, form(a.extraction, { age: '53' }, ['age']))).kind).toBe('saved');
-    expect(await submitAssignment(me, id, form(a.extraction, { age: '60' }, ['age']))).toEqual({ kind: 'expired' });
+    expect((await submitAssignment(me, id, form(a.extraction, { age: '53' }, true))).kind).toBe('saved');
+    expect(await submitAssignment(me, id, form(a.extraction, { age: '60' }, true))).toEqual({ kind: 'expired' });
     expect(await field(a.candidateId, 'age')).toMatchObject({ valueEn: '53' });
   });
 });

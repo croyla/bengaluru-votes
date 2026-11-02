@@ -5,13 +5,8 @@
  * the right scrolls. DESKTOP ONLY: the two must be side by side, so there
  * is no stacked layout for a phone.
  *
- * ONE GROUP PER FIELD, in the order a Form 26 affidavit gives them. Each
- * has the inputs (pre-filled with the value published now), a three-way
- * answer — a value, not declared, cannot read — and a tick. ONLY TICKED
- * FIELDS ARE SAVED; nothing is ticked on arrival, so a save always reflects
- * fields the transcriber chose to stand behind. The pre-filled AI value is
- * the known rubber-stamp risk; the tick is what makes each confirmation a
- * deliberate act rather than a default.
+ * One group per field, with one explicit confirmation for the whole form.
+ * All fields are validated and published together after confirmation.
  *
  * THE WARD IS READ-ONLY. A transcriber who could move a candidate could
  * choose their ward's work; a wrong ward goes to an admin through the
@@ -22,8 +17,8 @@
  * nothing the transcriber typed is lost.
  *
  * Works without JavaScript. src/islands/TranscribeForm.ts adds the running
- * assets total, greys out inputs when the answer is not a value, ticks a
- * field the transcriber edits, and counts down the hold.
+ * assets total, greys out inputs when the answer is not a value, counts
+ * down the hold and returns to Start on expiry.
  */
 import TranscriberLayout from '../../../layouts/TranscriberLayout.astro';
 import Banner from '../../../components/Banner.astro';
@@ -63,7 +58,6 @@ const fields = view.fields.map((field) => {
     ...field,
     status,
     inputs,
-    ticked: raw?.checked.includes(field.key) ?? false,
     error: errors[field.key],
     label: t(lang, CANDIDATE_PROFILE_LABEL_KEYS[field.key]),
   };
@@ -125,16 +119,15 @@ const fields = view.fields.map((field) => {
                   </p>
                 )}
               </AffidavitFieldInputs>
-
-              <label class="tick">
-                <input type="checkbox" name={`checked.${field.key}`} checked={field.ticked} data-tick />
-                <span>{t(lang, 'transcribe.reading.tick')}</span>
-              </label>
             </fieldset>
           ))
         }
 
         <div class="save-bar">
+          <label class="tick">
+            <input type="checkbox" name="confirmChecked" checked={raw?.confirmed ?? false} required />
+            <span>{t(lang, 'transcribe.reading.tick')}</span>
+          </label>
           <Button type="submit" variant="primary" lang={lang}>
             {t(lang, 'transcribe.reading.save')}
           </Button>
@@ -346,8 +339,7 @@ const fields = view.fields.map((field) => {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding-top: var(--space-3);
-    border-top: 1px solid var(--color-border);
+    min-height: 44px;
     font-weight: 700;
     cursor: pointer;
   }
@@ -363,6 +355,10 @@ const fields = view.fields.map((field) => {
   .save-bar {
     position: sticky;
     bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
     padding-block: var(--space-3);
     background: var(--color-bg);
     border-top: 1px solid var(--color-border);

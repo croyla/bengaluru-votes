@@ -5,7 +5,7 @@
  * THE QUEUE HAS NO LIST. `drawAssignment` hands out the next affidavit by a
  * fixed priority — missing data, then low AI confidence, then the rest,
  * random within each — and nothing here lets a caller name the one they
- * want. An assignment is a 45-minute HOLD, not ownership: past its expiry
+ * want. An assignment is a 10-minute HOLD, not ownership: past its expiry
  * the affidavit is anyone's to draw again, so a half-read one is never
  * stranded. Only affidavits the AI has read are in the queue: one stored
  * before the queue existed has no extraction to check a reading against.
@@ -34,7 +34,7 @@ import { getKnownSetting } from './settings';
 import { translateFieldSoon } from './translate-runtime';
 import { logEvent } from './log';
 
-export const ASSIGNMENT_MINUTES = 45;
+export const ASSIGNMENT_MINUTES = 10;
 /** Used when `low_confidence_threshold` is unset or not a number. A placeholder until the Kannada pilot sets one. */
 export const DEFAULT_LOW_CONFIDENCE_THRESHOLD = 70;
 
@@ -69,7 +69,7 @@ export async function drawAssignment(transcriberId: number): Promise<number | nu
         await tx.execute(sql`SELECT pg_advisory_xact_lock(7426, ${transcriberId})`);
         await tx.execute(sql`
           UPDATE transcription_assignments SET state = 'abandoned', closed_at = now()
-           WHERE state = 'open' AND expires_at < now()
+           WHERE state = 'open' AND expires_at <= now()
         `);
         const rows = await tx.execute<{ id: number }>(sql`
           WITH mine AS (
@@ -167,7 +167,7 @@ async function findAssignment(transcriberId: number, assignmentId: number) {
         eq(transcriptionAssignments.id, assignmentId),
         eq(transcriptionAssignments.transcriberId, transcriberId),
         eq(transcriptionAssignments.state, 'open'),
-        sql`${transcriptionAssignments.expiresAt} >= now()`,
+        sql`${transcriptionAssignments.expiresAt} > now()`,
       ),
     );
   return row ?? null;
@@ -220,7 +220,7 @@ export async function loadAssignment(transcriberId: number, assignmentId: number
 /** What the transcriber posted, as posted, so a refused save can show it back unchanged. */
 export interface RawForm {
   status: Record<AffidavitFieldKey, FieldStatus>;
-  checked: AffidavitFieldKey[];
+  confirmed: boolean;
   inputs: Record<string, string>;
 }
 
@@ -231,29 +231,26 @@ export type SubmitOutcome =
 
 export function readForm(form: FormData): RawForm {
   const status = {} as Record<AffidavitFieldKey, FieldStatus>;
-  const checked: AffidavitFieldKey[] = [];
+  const confirmed = form.get('confirmChecked') === 'on';
   const inputs: Record<string, string> = {};
   for (const key of AFFIDAVIT_FIELD_KEYS) {
     const field = readFieldForm(form, key);
     status[key] = field.status;
     Object.assign(inputs, field.inputs);
-    if (form.get(`checked.${key}`) != null) checked.push(key);
   }
-  return { status, checked, inputs };
+  return { status, confirmed, inputs };
 }
 
 /**
- * Saves a reading. Only the fields the transcriber ticked are published —
- * as checked by a person, each recording whether they kept the AI's value —
- * and the rest are not touched. If any ticked field is invalid nothing is
- * written. One transaction: the assignment is re-checked under a lock, so a
- * save that arrives after the hold expired, or twice, writes nothing.
+ * Saves the whole reading after one explicit form-wide confirmation.
+ * Every field is validated before anything is published. The assignment is
+ * re-checked under a lock, so expired or duplicate saves write nothing.
  */
 export async function submitAssignment(transcriberId: number, assignmentId: number, form: FormData): Promise<SubmitOutcome> {
   const raw = readForm(form);
   const errors: Partial<Record<AffidavitFieldKey, FieldError>> = {};
   const fields: FieldData[] = [];
-  for (const key of raw.checked) {
+  for (const key of AFFIDAVIT_FIELD_KEYS) {
     const data = fieldFromInputs(key, raw.status[key], raw.inputs);
     const error = errorFor(data, raw.inputs);
     if (error) errors[key] = error;
@@ -262,7 +259,7 @@ export async function submitAssignment(transcriberId: number, assignmentId: numb
 
   const found = await findAssignment(transcriberId, assignmentId);
   if (!found) return { kind: 'expired' };
-  if (raw.checked.length === 0) return { kind: 'invalid', errors, formError: 'nothing_checked', raw };
+  if (!raw.confirmed) return { kind: 'invalid', errors, formError: 'nothing_checked', raw };
   if (Object.keys(errors).length > 0) return { kind: 'invalid', errors, raw };
 
   const extraction = found.extraction as AffidavitExtraction | null;
@@ -275,7 +272,7 @@ export async function submitAssignment(transcriberId: number, assignmentId: numb
           eq(transcriptionAssignments.id, assignmentId),
           eq(transcriptionAssignments.transcriberId, transcriberId),
           eq(transcriptionAssignments.state, 'open'),
-          sql`${transcriptionAssignments.expiresAt} >= now()`,
+          sql`${transcriptionAssignments.expiresAt} > now()`,
         ),
       )
       .returning({ id: transcriptionAssignments.id });
@@ -371,7 +368,7 @@ export async function currentAssignment(transcriberId: number): Promise<number |
       and(
         eq(transcriptionAssignments.transcriberId, transcriberId),
         eq(transcriptionAssignments.state, 'open'),
-        sql`${transcriptionAssignments.expiresAt} >= now()`,
+        sql`${transcriptionAssignments.expiresAt} > now()`,
       ),
     );
   return row?.id ?? null;
