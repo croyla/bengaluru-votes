@@ -132,13 +132,15 @@ describe('Trust & legal pages (Task 22) — IA §3.13/§3.17/§3.18, PRD §5.11/
   describe('Terms (/terms)', () => {
     it('renders a distinctive sentence from the EN content, in both languages, with correct title/description/lang', async () => {
       const en = await renderPage(Terms, 'en', '/terms');
-      expect(en.html).toContain('Acceptable use');
+      expect(en.html).toContain('Using the site');
       expect(en.html).toContain('<title>Terms and conditions');
       expect(en.html).toMatch(/<html lang="en"/);
 
       const kn = await renderPage(Terms, 'kn', '/terms');
       expect(kn.html).toContain('ಊರ್ವಾಣಿ ಫೌಂಡೇಶನ್');
       expect(kn.html).toMatch(/<html lang="kn"/);
+      expect(kn.html).toContain('href="/kn/privacy"');
+      expect(kn.html).not.toContain('/kn/kn/');
     });
 
     it('never leaks LEGAL REVIEW REQUIRED / INPUT NEEDED authoring markers into the rendered HTML', async () => {
@@ -186,12 +188,15 @@ describe('Trust & legal pages (Task 22) — IA §3.13/§3.17/§3.18, PRD §5.11/
       expect(html).not.toContain('INPUT NEEDED');
     });
 
-    it('carries the full §5.16 processor inventory', async () => {
+    it('describes current citizen services without retired contact-delivery providers', async () => {
       const { html } = await renderPage(Privacy, 'en', '/privacy');
-      for (const processor of ['SendGrid', 'Twilio', 'Google', 'Anthropic', 'Sentry']) {
+      for (const processor of ['Google Analytics', 'Google Maps', 'Google reCAPTCHA']) {
         expect(html).toContain(processor);
       }
-      expect(html).toContain('reCAPTCHA');
+      expect(html).not.toContain('SendGrid');
+      expect(html).not.toContain('Twilio');
+      expect(html).toContain('Login is for authorised staff only');
+      expect(html).toContain('sivaramakrishnan.n@oorvani.in');
     });
 
     it('shows the courtesy-translation note on the KN page only, not on EN', async () => {

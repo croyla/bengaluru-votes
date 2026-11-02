@@ -1,105 +1,46 @@
 ---
 title: Privacy policy
-description: What personal data this platform collects, why, who processes it, and your rights over it under the DPDP Act, 2023.
+description: How Bengaluru Votes handles ward lookups, anonymous contributions, cookies and technical data.
 ---
 
-<!-- LEGAL REVIEW REQUIRED -->
+*Last updated: 2 November 2026*
 
-*This page is a working draft of the privacy policy for this platform, structured around the sections the product specification requires (PRD §5.16). It has not been reviewed by a lawyer and must not be treated as final or binding until it has been. In particular, the retention period below is a product proposal pending legal confirmation — see the note in that section — and this page cannot ship in its current form until that confirmation lands.*
+Bengaluru Votes is operated by **Oorvani Foundation**. Citizens can use the site, vote on ward issues and report candidate-data errors without registering or providing a name, email address or phone number. We do not offer citizen accounts or email/WhatsApp subscriptions. Login is for authorised staff only.
 
-## Who operates this platform?
+Using the site still involves limited data processing, described below. We do not sell visitor data.
 
-This platform is operated by the **Oorvani Foundation**.
+## Finding your ward
 
-## What personal data do we collect, and why?
+When you type an address, Google services provide address suggestions and look up its location. We store the normalized address and resulting ward to speed up repeated searches, without linking that record to a citizen account. Please enter a place or address, not your name or contact details.
 
-- **Email address and/or phone number** — to send a one-time password (OTP) for sign-in, and, if you consent, ward election updates and critical product notices.
-- **Address, converted to your ward** — so we can show you the right ward and, if you register, send you updates relevant to your ward.
-- **Your device's location, only if you ask us to use it** — the "use my current location" button on the ward finder sends your coordinates to us once, so we can work out which ward you are standing in. We use them for that answer and then discard them: they are never stored, never written to our logs, and never sent to any other company. Your browser asks your permission first, and typing your address instead works just as well.
-- **Language preference** — so we show you the site, and send notifications, in the language you chose.
-- **`src` attribution** — if you arrived via a partner's tagged link, we record which partner sent you, for measurement only. This grants no permissions and doesn't change anything you see.
-- **Standard server logs** — the ordinary technical logs any web server keeps (IP address, request timestamps, and similar), kept for security and operational purposes.
-- **Google Analytics usage data and cookies** — see below.
-- **Issue-vote receipt** — after you vote, we store a random receipt in an HttpOnly browser cookie and keep only its SHA-256 hash in our database. It is not linked to a name, phone number, email address, account, or IP address. It prevents that browser from casting another ballot and lets it reveal results for the ward where it voted.
+If you choose **use my current location**, your browser asks permission and sends us your coordinates to identify your ward. We use those coordinates for that lookup, then discard them; we do not store or log them or send them to Google. Embedded Google maps separately connect your browser to Google.
 
-## How do we measure site usage?
+## Issue votes and error reports
 
-We use **Google Analytics** to understand how visitors use this platform, alongside our own server-side application events. Google Analytics sets cookies and collects usage data (pages visited, general location, device type) as described in Google's own privacy policy.
+- **Issue votes:** we store your three choices and a hash of a random browser receipt. The receipt cookie lasts up to one year and lets your browser see its choices and results while preventing another ballot. The ballot record is not linked to your name, contact details, account or IP address. Public results are aggregate counts and percentages.
+- **Candidate-error reports:** we store your explanation and any suggested correction or source link for private curator review. Please do not include personal or sensitive information about yourself or others. Reports do not automatically change candidate information, and anonymous reporters receive submission confirmation only.
+- **Abuse prevention:** reporting uses a random browser cookie, hashed browser identifiers and keyed hashes of IP addresses to limit spam and duplicate submissions. These are technical identifiers, not proof of a person's identity. A report made while signed in as staff may also be linked to that staff account.
 
-## reCAPTCHA on anonymous submissions
+## Cookies, Google services and logs
 
-Anonymous ward issue voting and candidate-error reporting are protected by **Google reCAPTCHA v3**, which sets its own cookies and sends usage data to Google to keep these no-account submissions safe from automated abuse.
+We use **Google Analytics** to understand site usage, **Google Maps and address lookup** to help find wards, and **Google reCAPTCHA** to protect submissions. These services may receive browser/device information, IP addresses and usage information, and use cookies. Google's processing is described in its [Privacy Policy](https://policies.google.com/privacy) and [information about partner sites](https://policies.google.com/technologies/partner-sites). reCAPTCHA is subject to Google's [Privacy Policy](https://policies.google.com/privacy) and [Terms of Service](https://policies.google.com/terms).
 
-## Who else processes your data?
+A partner-link attribution cookie may remember which partner referred you for up to 30 days. Staff login uses a session cookie. Our hosting infrastructure and application record technical information for operation and security; server logs may include IP addresses, requested URLs, referral URLs, browser information and timestamps.
 
-We share personal data only with the service providers that operate this platform, strictly under contract, on our behalf, and never for their own purposes. This is the complete list:
+Service providers supporting hosting and these features process the data needed to provide them. Google may process data outside India. We may also disclose information when required by law. We do not use Sentry for error reporting.
 
-- **SendGrid and Twilio** — receive your contact details (email and/or phone number) to deliver the OTPs and updates you've consented to. If you choose WhatsApp as your delivery channel, your number is additionally handled under **Meta's** WhatsApp Business terms, since WhatsApp messages are delivered through Meta's platform.
-- **Google Geocoding** — receives the address you enter to look up your ward, sent server-side. We cache only the normalized address-to-ward result, never linked back to your account or identity.
-- **Anthropic** — processes candidate report-card text (for translation between English and Kannada, and for extracting structured data from affidavits). This is candidate data drawn from public records, not your personal contact details.
-- **Sentry** — receives server-side error reports if something goes wrong, scrubbed of contact details and addresses before being sent.
+## How long information stays
 
-Each of these providers operates under executed data-processing terms with the Oorvani Foundation.
+The report cookie and report browser identifiers expire after 30 days; report-related network hashes expire after 48 hours. Duplicate-detection fingerprints for closed reports expire seven days after closure. Aggregate abuse counters are retained for 30 days. Expired server-side abuse metadata is removed by the next daily cleanup.
 
-## Do you sell or share my data?
+These limits do not delete report content, ballots, address-to-ward lookup records or ordinary server logs. Those records currently have no fixed automatic deletion period. Cookie expiry does not itself delete the corresponding database record. Google's retention is governed by its service policies and settings.
 
-No. We do not sell citizen data, and we do not share it with anyone except the service providers listed above, who process it strictly on our behalf under contract. Your contact details are used for **two purposes only**:
+## Your choices and contacting us
 
-1. **Ward election updates** — for your registered home ward, if you've opted in.
-2. **Critical product updates** — narrowly meaning service-affecting notices, such as a security incident, a material change to these terms, or the platform shutting down. This is **not** a channel for announcing new features, and we don't use it that way.
+You can decline browser location permission and type a place or address instead. Browser settings let you block or clear cookies; this may prevent submissions or remove access to your previous voting receipt. Clearing cookies does not delete records already stored by us or Google. Google also provides [Analytics opt-out tools](https://tools.google.com/dlpage/gaoptout).
 
-<!-- If a future "civic tools beyond this election" feature is ever built, using these contacts to promote it needs its own, freshly collected consent — not this clause. See the optional "future civic tools" checkbox at registration, where that separate consent is collected. -->
+For privacy questions, complaints, or requests to access, correct or delete information you believe we hold about you, email **[sivaramakrishnan.n@oorvani.in](mailto:sivaramakrishnan.n@oorvani.in)**. We will assess requests under applicable law. Because anonymous contributions have no contact identity, we may be unable to identify a record as yours. If you email us, we receive your email address and message and use them to handle your enquiry.
 
-## Consent and withdrawal
+## Changes and language
 
-Signing up for ward updates by email or WhatsApp is opt-in. You can withdraw consent for these updates at any time from your account notification settings, or by following the unsubscribe/opt-out instructions included in each message. Withdrawing consent doesn't affect your ability to use the platform's public, read-only features.
-
-## Your rights under the DPDP Act, 2023
-
-As a data principal under India's Digital Personal Data Protection Act, 2023, you have the right to:
-
-- Know what personal data of yours we hold and how it's processed.
-- Correct or update inaccurate or incomplete personal data.
-- **Request erasure** of your personal data, subject to any legal retention requirements.
-- Withdraw consent for optional processing (such as ward update notifications) at any time.
-- Nominate another individual to exercise these rights on your behalf in the event of your death or incapacity, as provided under the Act.
-
-**A note on backups:** when you request erasure, we remove your personal data from the live system. However, encrypted nightly backups already taken before your request will still contain that data until those backups age out and are rotated out under our retention schedule — erasure is not instantaneous across every backup copy.
-
-## Grievance officer
-
-<!-- INPUT NEEDED: named grievance officer and contact details, as required under the DPDP Act, 2023. -->
-
-## How long do you keep my data?
-
-Our proposal — pending confirmation by legal counsel — is that citizen contact data (email, phone, address-derived ward, and related account data) is deleted or anonymized **within 3 months of the election results being declared**, with encrypted backups aging out on rotation.
-
-**This retention period is a product proposal, not yet legally confirmed**, and this page will state the exact, confirmed period once that legal review is complete. Until then, treat any specific number you may see elsewhere as provisional.
-
-## Issue votes
-
-You choose exactly three issues and can cast one ballot from a browser in one ward. Results remain hidden until that browser votes, then appear as issue counts and the percentage of ward ballots that selected each issue. Because every ballot has three selections, those percentages can add up to 300%.
-
-The database stores the ballot choices beside a hash of the random browser receipt, not beside your name or account. We do not log the receipt or your selected issue IDs. Clearing browser storage can remove the receipt; this practical safeguard reduces repeat voting but cannot prove that one person has voted only once without requiring identity or registration.
-
-## Candidate-error reports
-
-You can report a candidate-field error without an account, email address or phone number. We store your explanation and optional correction/source link for private curator review. Please avoid including personal contact information. Reports do not automatically change published data. If you are signed in, your account history shows the outcome; anonymous submissions receive confirmation but have no outcome-history service.
-
-A signed random browser cookie lasts 30 days. We store a keyed hash, not the cookie value, with reports to reduce duplicates and abuse. Browser identifiers expire after 30 days. Network limits use a keyed hash of your IP address; this network metadata expires after 48 hours. Closed-report duplicate fingerprints expire after seven days. Expired metadata is removed by the next daily cleanup. Anonymous reports are not later attached to an account when you sign in. Report content follows the existing report/account retention policy, whose final period remains under review.
-
-Aggregate abuse counters contain no report text or reporter identifiers and are retained for 30 days. These limits do not govern ordinary server access logs, which may contain IP addresses. Their retention must be confirmed operationally before this draft policy is finalized.
-
-## Language of this policy
-
-This policy is published in both English and Kannada. **The English version is legally controlling.** The Kannada version is a courtesy translation provided for accessibility.
-
-<!-- LEGAL REVIEW REQUIRED: exact wording of the Kannada courtesy-translation note, to be confirmed by counsel. -->
-
-## Changes to this policy
-
-We may update this policy from time to time, particularly once the retention period above is legally confirmed. Material changes will be reflected with an updated date on this page.
-
-## Contact us
-
-<!-- INPUT NEEDED: contact details for privacy questions or DPDP rights requests, distinct from or alongside the grievance officer contact above. -->
+We will publish changes here and update the date above. This policy is available in English and Kannada; the English version controls if the versions differ.

@@ -1,57 +1,42 @@
 ---
 title: Terms and conditions
-description: Terms of use for this platform, including acceptable use, contribution licensing, accuracy disclaimers, and account termination grounds.
+description: Terms for using Bengaluru Votes, submitting anonymous contributions and accessing election information.
 ---
 
-<!-- LEGAL REVIEW REQUIRED -->
+*Last updated: 2 November 2026*
 
-*This page is a working draft of the terms and conditions for this platform, structured around the sections the product specification requires (PRD §5.16). It has not been reviewed by a lawyer and must not be treated as final or binding until it has been. Do not publish this page without legal sign-off.*
+Bengaluru Votes is operated by **Oorvani Foundation**. By using this site, you agree to these terms. Our [Privacy policy](/privacy) explains how information is handled.
 
-This platform is operated by the **Oorvani Foundation**. By using this platform, you agree to these terms.
+## Using the site
 
-## Acceptable use
+The site provides ward and candidate information to help citizens understand Bengaluru's local elections. It is not an election authority. Citizens do not need an account to browse, vote on ward issues or report candidate-data errors. Login is reserved for authorised staff.
 
-- Use this platform to find ward-level election information, engage with candidate data, and participate in issue voting and error-flagging as intended.
-- Do not attempt to submit false information, impersonate another person or organisation, or misuse the flagging or issue-voting mechanisms to disrupt or mislead other users.
-- Do not attempt to circumvent rate limits, automated abuse protections, or access controls.
+Use the site lawfully. Do not knowingly submit false or misleading information, impersonate others, harass people, submit spam, interfere with the service, or bypass security controls and submission limits. Do not include private contact details or other unnecessary personal information in reports.
 
-<!-- LEGAL REVIEW REQUIRED: confirm scope and enforceability of the acceptable-use clause above. -->
+## Issue voting
 
-## Contribution licensing
+Choose exactly three issues in one ward. A browser receipt limits repeat voting and reveals results after submission. A submitted ballot cannot be changed. Results describe participation on this site, not a representative survey, a verified count of individual residents or an official election result. Issue voting does not register you to vote or cast an electoral vote.
 
-When you flag a possible error or cast a vote on a ward issue, you grant the platform a licence to record, publish, and display that contribution (or its aggregate result) as part of the platform's public record, consistent with how each feature is described elsewhere on the platform:
+## Reporting errors
 
-- **Flags** are used internally to review and correct data; the fact that a field was corrected may be reflected in the public audit trail, without attributing the correction to you by name.
-- **Issue votes** are published only in aggregate — as a ranked order with percentage shares — never as an individually attributed vote.
+Reports are private submissions for curator review. Curators may dismiss a report or use it to correct published information; submission does not guarantee a change or a personal reply.
 
-<!-- LEGAL REVIEW REQUIRED: confirm the licensing language above is sufficient and consistent with /privacy. -->
+You give Oorvani Foundation a non-exclusive permission to store and review your submission, use it to make and publish corrections, and include issue votes in aggregate results for this platform. This does not give us permission to publish your private report as a public comment. Submit only material you are entitled to share.
 
-## Accuracy and liability disclaimers
+## Accuracy and availability
 
-Candidate and ward information on this platform is sourced primarily from official sworn affidavits and other public records, and is provided for citizen information only. While we take reasonable care to source, verify, and correct this information, we do not guarantee it is complete, current, or error-free at every moment, and it should not be treated as a substitute for official Election Commission records for any legal or electoral purpose.
+Candidate information is drawn from affidavits and other cited sources. Some information is extracted or translated using AI, and may contain errors. We work to correct errors but cannot guarantee that all information is complete, current or accurate, or that the site will always be available.
 
-For anything affecting your ability to vote — registration status, voter ID, polling booth assignment — always confirm through the official Election Commission / Chief Electoral Officer, Karnataka channels linked from this platform.
+For voter registration, polling locations, eligibility, election dates and official results, check the relevant election authority's records and announcements. External links and embedded services have their own terms and privacy policies.
 
-<!-- LEGAL REVIEW REQUIRED: standard liability limitation language to be added by counsel. -->
+To the extent permitted by applicable law, Oorvani Foundation is not liable for loss resulting from reliance on inaccurate or unavailable site information. Nothing in these terms excludes liability or rights that cannot lawfully be excluded.
 
-## Account termination
+## Protecting the service
 
-We may suspend or terminate a registered account, including a curator or admin account, where a user:
+We may reject abusive submissions or restrict access to protect the site and its users. Staff must use only their authorised access and protect their credentials; access may be suspended or withdrawn for misuse.
 
-- Submits knowingly false information, or repeatedly misuses the flagging or issue-voting mechanisms.
-- Violates the acceptable-use terms above.
-- Abuses curator publish-immediately trust (for curator/admin accounts specifically).
+## Changes, language and contact
 
-This is consistent with the administrative ban capability described in the platform's access model.
+We may update these terms by publishing a revised version with a new date. The English version controls if it differs from the Kannada translation.
 
-<!-- LEGAL REVIEW REQUIRED: confirm termination grounds and any required notice/appeal process. -->
-
-## Changes to these terms
-
-We may update these terms from time to time. Material changes will be reflected with an updated date on this page.
-
-<!-- LEGAL REVIEW REQUIRED: confirm notice requirements for material changes. -->
-
-## Contact
-
-<!-- INPUT NEEDED: contact details for questions about these terms. -->
+For questions about these terms, contact **[sivaramakrishnan.n@oorvani.in](mailto:sivaramakrishnan.n@oorvani.in)**.
