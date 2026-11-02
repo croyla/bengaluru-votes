@@ -9,6 +9,7 @@
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
+import { candidateIdentitySelection } from './candidate-identity';
 import { candidateAffidavits, candidateFields, candidates, media, wards } from '../db/schema';
 import { AFFIDAVIT_FIELD_KEYS, moveCandidateWard, publishAffidavitFields, type AffidavitFieldKey, type FieldData, type FieldStatus } from './affidavit-publish';
 import { FIELD_INPUTS, errorFor, fieldFromInputs, inputsOf, readFieldForm, storedFieldData, type FieldError, type RawField } from './affidavit-form';
@@ -90,7 +91,7 @@ export async function waitingAffidavitOf(candidateId: number): Promise<number | 
 
 export async function loadFixCandidate(candidateId: number): Promise<FixCandidate | null> {
   const [row] = await db
-    .select({ id: candidates.id, slug: candidates.slug, nameEn: candidates.nameEn, partyEn: candidates.partyEn, wardId: wards.id, wardNameEn: wards.nameEn, wardNameKn: wards.nameKn })
+    .select({ id: candidates.id, slug: candidates.slug, ...candidateIdentitySelection(), wardId: wards.id, wardNameEn: wards.nameEn, wardNameKn: wards.nameKn })
     .from(candidates)
     .innerJoin(wards, eq(wards.id, candidates.wardId))
     .where(eq(candidates.id, candidateId));
@@ -177,4 +178,54 @@ export async function saveFieldFix(actor: StaffActor, candidateId: number, data:
 /** Moves a candidate to another ward outside any flag (the candidate editor). */
 export async function saveWardFix(candidateId: number, wardId: number, sourceUrl: string): Promise<void> {
   await db.transaction((tx) => moveCandidateWard(tx, candidateId, wardId, sourceUrl));
+}
+
+export interface CandidateBatchRefusal {
+  key: string;
+  raw: Partial<Record<AffidavitFieldKey, RawField>>;
+  errors: Partial<Record<AffidavitFieldKey, FieldError>>;
+  wardId: string;
+}
+
+/** Validate the entire editor before writing anything. Only changed values are
+ * marked checked; unchanged and incomplete legacy values retain their provenance. */
+export async function saveCandidateChanges(actor: StaffActor, candidate: FixCandidate, form: FormData):
+Promise<{ kind: 'saved' } | ({ kind: 'refused' } & CandidateBatchRefusal)> {
+  const fields = await loadFixFields(candidate);
+  const raw = Object.fromEntries(fields.map((field) => [field.key, readFieldForm(form, field.key)])) as Record<AffidavitFieldKey, RawField>;
+  const errors: CandidateBatchRefusal['errors'] = {};
+  const wardId = String(form.get('wardId') ?? '');
+  const refuse = (key: string) => ({ kind: 'refused' as const, key, raw, errors, wardId });
+  if (!candidate.pdfUrl) return refuse('curator.fix.error.noAffidavit');
+  if (form.get('confirmPublish') == null) return refuse('curator.fix.error.confirmRequired');
+
+  const changes: FieldData[] = [];
+  for (const field of fields) {
+    const posted = raw[field.key];
+    if (!form.has(`status.${field.key}`)) return refuse('curator.candidateEdit.error.incompleteForm');
+    const sameInputs = posted.status === field.status && (posted.status !== 'value' ||
+      FIELD_INPUTS[field.key].every((name) => posted.inputs[name].trim() === (field.inputs[name] ?? '').trim()));
+    if (sameInputs) continue;
+    const data = fieldFromInputs(field.key, posted.status, posted.inputs);
+    const error = errorFor(data, posted.inputs);
+    if (error) { errors[field.key] = error; continue; }
+    const published = await publishedFieldData(candidate, field.key);
+    if (!published || !unchanged(data, published)) changes.push(data);
+  }
+  if (Object.keys(errors).length) return refuse('curator.candidateEdit.error.fieldsInvalid');
+  let nextWard: number | undefined;
+  if (wardId !== String(candidate.wardId)) {
+    const parsed = await parseWardFix(form, candidate.wardId);
+    if (!parsed.ok) return refuse(parsed.key);
+    nextWard = parsed.wardId;
+  }
+  if (!changes.length && nextWard === undefined) return refuse('curator.fix.error.unchanged');
+
+  const sourceUrl = candidate.pdfUrl;
+  const translate = await db.transaction(async (tx) => {
+    if (nextWard !== undefined) await moveCandidateWard(tx, candidate.id, nextWard, sourceUrl);
+    return changes.length ? publishAffidavitFields(tx, actor, candidate.id, changes, { sourceUrl, checked: true }) : [];
+  });
+  for (const id of translate) translateFieldSoon({ table: 'candidate_fields', id });
+  return { kind: 'saved' };
 }

@@ -169,6 +169,14 @@ describe('Ward result page (/ward/{id}, /kn/ward/{id}) — IA §3.2, PRD §5.1',
     });
     await deleteWardCandidates();
     await db.insert(schema.candidates).values(CANDIDATES);
+    const identities = await db.select().from(schema.candidates).where(eq(schema.candidates.wardId, WARD.id));
+    for (const c of identities) {
+      await db.insert(schema.candidateFields).values([
+        { candidateId: c.id, fieldKey: 'full_name', valueEn: c.nameEn, valueKn: c.nameKn },
+        { candidateId: c.id, fieldKey: 'party', valueEn: c.partyEn, valueKn: c.partyKn },
+      ]);
+      await db.update(schema.candidates).set({ nameKn: 'STALE Kannada name', partyKn: 'STALE Kannada party' }).where(eq(schema.candidates.id, c.id));
+    }
   });
 
   afterAll(async () => {

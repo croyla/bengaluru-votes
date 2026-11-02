@@ -20,6 +20,7 @@
  */
 import { desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../db/client';
+import { candidateIdentitySelection } from './candidate-identity';
 import {
   candidateAffidavits,
   candidates,
@@ -37,11 +38,8 @@ import { resolveFlag, type FlagFix } from './flags';
 import { AFFIDAVIT_FIELD_KEYS, type AffidavitFieldKey } from './affidavit-publish';
 import type { FieldError, RawField } from './affidavit-form';
 import { loadFixCandidate, loadFixFields, parseFieldFix, parseWardFix, publishedFieldData, saveFieldFix, saveWardFix, type FixCandidate, type FixField, type StaffActor } from './curator-fix';
-import { createCandidate, publishCandidateCore } from './publish';
-import { storeMedia, type MediaStoreErrorCode } from './media';
-import { countWaitingMatches, enqueueAffidavit } from './affidavit-queue';
-import { checkDefaultLimit } from './rate-limit';
-import { fetchAffidavitFromEc, type AffidavitFetchErrorCode } from './affidavit-fetch';
+import { createCandidate } from './publish';
+import { countWaitingMatches } from './affidavit-queue';
 import type { Lang } from '../i18n';
 
 type FlagTargetType = (typeof flagTargetEnum.enumValues)[number];
@@ -56,7 +54,6 @@ function extractionStatusOf(state: AffidavitState): ExtractionStatus {
   if (state === 'failed') return 'failed';
   return 'pending';
 }
-const CANDIDATE_STATUSES = ['filed', 'contesting', 'rejected', 'withdrawn'] as const satisfies readonly CandidateStatus[];
 
 /** Same shape `src/middleware.ts` puts on `locals.session` for an authed request. */
 export type CuratorActor = StaffActor;
@@ -346,11 +343,7 @@ export interface CandidateEditData {
   wardNameEn: string;
   wardNameKn: string;
   nameEn: string;
-  nameKn: string | null;
   partyEn: string;
-  partyKn: string | null;
-  photoMediaId: number | null;
-  photoUrl: string | null;
   status: CandidateStatus;
   /** The stored affidavit every value is checked against; null for a candidate with none. */
   pdfUrl: string | null;
@@ -370,17 +363,11 @@ export async function loadCandidateForEdit(candidateId: number): Promise<Candida
       wardId: candidates.wardId,
       wardNameEn: wards.nameEn,
       wardNameKn: wards.nameKn,
-      nameEn: candidates.nameEn,
-      nameKn: candidates.nameKn,
-      partyEn: candidates.partyEn,
-      partyKn: candidates.partyKn,
-      photoMediaId: candidates.photoMediaId,
-      photoHash: media.sha256,
+      ...candidateIdentitySelection(),
       status: candidates.status,
     })
     .from(candidates)
     .innerJoin(wards, eq(wards.id, candidates.wardId))
-    .leftJoin(media, eq(media.id, candidates.photoMediaId))
     .where(eq(candidates.id, candidateId));
   if (!row) return null;
 
@@ -415,11 +402,7 @@ export async function loadCandidateForEdit(candidateId: number): Promise<Candida
     wardNameEn: row.wardNameEn,
     wardNameKn: row.wardNameKn,
     nameEn: row.nameEn,
-    nameKn: row.nameKn,
     partyEn: row.partyEn,
-    partyKn: row.partyKn,
-    photoMediaId: row.photoMediaId,
-    photoUrl: row.photoMediaId != null && row.photoHash ? `/media/${row.photoMediaId}/${row.photoHash.slice(0, 16)}` : null,
     status: row.status,
     pdfUrl: fixCandidate.pdfUrl,
     waitingAffidavitId: fixCandidate.waitingAffidavitId,
@@ -434,113 +417,18 @@ export async function loadWardBasic(wardId: number): Promise<{ id: number; nameE
   return row ?? null;
 }
 
-export type CandidateCoreOutcome = { kind: 'saved' } | { kind: 'validation_error'; key: string };
 export type CandidateCreateOutcome = { kind: 'created'; id: number } | { kind: 'validation_error'; key: string };
 
-/** Error key for a `storeMedia` throw — shared by the core-publish and create paths below. */
-function photoErrorKey(err: unknown): string {
-  const code = err instanceof Error ? (err.message as MediaStoreErrorCode | string) : '';
-  if (code === 'media_too_large') return 'curator.candidateEdit.error.photoTooLarge';
-  return 'curator.candidateEdit.error.photoUnsupported';
-}
-
-/** Stores the photo chosen on a candidate form, if any: `photoMediaId` is `undefined` when no file was chosen (the caller decides what "no file" means for its path), else a freshly stored media id. */
-async function storePhotoFrom(actor: { userId: number }, form: FormData): Promise<{ ok: true; photoMediaId?: number } | { ok: false; key: string }> {
-  const photo = form.get('photo');
-  if (!(photo instanceof File) || photo.size === 0) return { ok: true };
-  const allowed = await checkDefaultLimit(actor.userId, 'upload');
-  if (!allowed) return { ok: false, key: 'curator.candidateEdit.error.uploadRateLimited' };
-  try {
-    const bytes = Buffer.from(await photo.arrayBuffer());
-    const stored = await storeMedia(actor, { bytes, declaredType: photo.type }, 'photo');
-    return { ok: true, photoMediaId: stored.id };
-  } catch (err) {
-    return { ok: false, key: photoErrorKey(err) };
-  }
-}
-
-/** Reads+validates the name/party/photo fields of the create form. Returns a validation-error key, or the parsed values plus a freshly stored `photoMediaId` (`undefined` when no file was chosen). */
-async function parseCandidateCoreForm(
-  actor: { userId: number },
-  form: FormData,
-): Promise<
-  | { ok: true; nameEn: string; nameKn: string | null; partyEn: string; partyKn: string | null; photoMediaId?: number }
-  | { ok: false; key: string }
-> {
-  const nameEn = String(form.get('nameEn') ?? '').trim();
-  const partyEn = String(form.get('partyEn') ?? '').trim();
-  const nameKnRaw = String(form.get('nameKn') ?? '').trim();
-  const partyKnRaw = String(form.get('partyKn') ?? '').trim();
-
-  if (!nameEn) return { ok: false, key: 'curator.candidateEdit.error.nameRequired' };
-  if (!partyEn) return { ok: false, key: 'curator.candidateEdit.error.partyRequired' };
-
-  const photo = await storePhotoFrom(actor, form);
-  if (!photo.ok) return photo;
-
-  return {
-    ok: true,
-    nameEn,
-    nameKn: nameKnRaw || null,
-    partyEn,
-    partyKn: partyKnRaw || null,
-    ...(photo.photoMediaId !== undefined ? { photoMediaId: photo.photoMediaId } : {}),
-  };
-}
-
-/**
- * Handles the CORE form on `/curator/candidate/{id}`: the Kannada name and
- * party, the photo and the status. The English name and party are the
- * `full_name` and `party` affidavit fields, which have one writer
- * (`handleCandidateFieldFix`), so a posted `nameEn`/`partyEn` is ignored. A photo file is only read (and stored) when one was actually
- * chosen — an empty file input leaves the existing photo untouched, it does
- * NOT clear it. Publishes via `publishCandidateCore`.
- *
- * INVARIANT: status is validated BEFORE the photo is stored, so an
- * invalid status → 400 with NO media row created and NO rate-limit consumed.
- */
-export async function handleCandidateCorePublish(
-  actor: CuratorActor,
-  candidateId: number,
-  form: FormData,
-): Promise<CandidateCoreOutcome> {
-  // Validate status FIRST, before any expensive operations like photo storage
-  const status = String(form.get('status') ?? '') as CandidateStatus;
-  if (!CANDIDATE_STATUSES.includes(status)) {
-    return { kind: 'validation_error', key: 'curator.candidateEdit.error.statusInvalid' };
-  }
-
-  const photo = await storePhotoFrom(actor, form);
-  if (!photo.ok) return { kind: 'validation_error', key: photo.key };
-
-  await publishCandidateCore(actor, {
-    candidateId,
-    nameKn: String(form.get('nameKn') ?? '').trim() || null,
-    partyKn: String(form.get('partyKn') ?? '').trim() || null,
-    status,
-    ...(photo.photoMediaId !== undefined ? { photoMediaId: photo.photoMediaId } : {}),
-  });
-
-  return { kind: 'saved' };
-}
-
-/** Handles the CORE (create) form on `/curator/candidate/new?ward={id}`. Status is always the schema default (`'filed'`) — there is no status select on the create form. */
 export async function handleCandidateCreate(
   actor: CuratorActor,
   wardId: number,
   form: FormData,
 ): Promise<CandidateCreateOutcome> {
-  const parsed = await parseCandidateCoreForm(actor, form);
-  if (!parsed.ok) return { kind: 'validation_error', key: parsed.key };
-
-  const { id } = await createCandidate(actor, {
-    wardId,
-    nameEn: parsed.nameEn,
-    nameKn: parsed.nameKn,
-    partyEn: parsed.partyEn,
-    partyKn: parsed.partyKn,
-    ...(parsed.photoMediaId !== undefined ? { photoMediaId: parsed.photoMediaId } : {}),
-  });
+  const nameEn = String(form.get('nameEn') ?? '').trim();
+  const partyEn = String(form.get('partyEn') ?? '').trim();
+  if (!nameEn) return { kind: 'validation_error', key: 'curator.candidateEdit.error.nameRequired' };
+  if (!partyEn) return { kind: 'validation_error', key: 'curator.candidateEdit.error.partyRequired' };
+  const { id } = await createCandidate(actor, { wardId, nameEn, partyEn });
 
   return { kind: 'created', id };
 }
@@ -563,93 +451,6 @@ export async function handleCandidateWardFix(candidate: CandidateEditData, form:
   const parsed = await parseWardFix(form, candidate.wardId);
   if (!parsed.ok) return { kind: 'refused', key: parsed.key };
   await saveWardFix(candidate.id, parsed.wardId, candidate.pdfUrl);
-  return { kind: 'saved' };
-}
-
-// ---------------------------------------------------------------------------
-// Affidavit ingestion (Task 37; architecture §7/§13; PRD §5.2) — the
-// `formAction=affidavit` form on `/curator/candidate/{id}`: upload the PDF
-// directly, OR paste its EC link (fetched SSRF-hardened, src/lib/affidavit-fetch.ts).
-// Either path lands the same way from here on: `storeMedia(kind:'affidavit')`
-// (magic-byte + size validation, identical for both paths — architecture
-// §7's "fetched bytes pass the same validation as a direct upload"), a new
-// `candidate_affidavits` row queued for the extraction worker
-// (src/lib/affidavit-queue.ts), which publishes the AI-read values onto this
-// candidate when it gets to it.
-// ---------------------------------------------------------------------------
-
-export type CandidateAffidavitOutcome =
-  | { kind: 'saved' }
-  | { kind: 'validation_error'; key: string };
-
-/** Error key for a `fetchAffidavitFromEc` throw — every SSRF rejection reads to the curator as "that's not a link this platform can fetch"; the size cap gets its own (shared with storeMedia's) message. */
-function affidavitFetchErrorKey(err: unknown): string {
-  const code = err instanceof Error ? (err.message as AffidavitFetchErrorCode | string) : '';
-  if (code === 'media_too_large') return 'curator.candidateEdit.error.affidavitTooLarge';
-  if (code === 'ssrf_scheme' || code === 'ssrf_host' || code === 'ssrf_ip' || code === 'ssrf_redirect_cap') {
-    return 'curator.candidateEdit.error.affidavitUrlRejected';
-  }
-  return 'curator.candidateEdit.error.affidavitFetchFailed';
-}
-
-/** Error key for a `storeMedia` throw on the affidavit path — shared size-cap key with `affidavitFetchErrorKey` above (the cap is the same 20 MB either way). */
-function affidavitStoreErrorKey(err: unknown): string {
-  const code = err instanceof Error ? (err.message as MediaStoreErrorCode | string) : '';
-  if (code === 'media_too_large') return 'curator.candidateEdit.error.affidavitTooLarge';
-  return 'curator.candidateEdit.error.affidavitUnsupported';
-}
-
-/**
- * Handles the affidavit form (`formAction=affidavit`) on
- * `/curator/candidate/{id}`: exactly one of an uploaded PDF (`affidavitFile`)
- * or a pasted EC link (`ecUrl`) must be present. Shares the same per-account
- * `upload` rate limit as the core photo upload (both write `media` rows).
- *
- * The PDF is queued for the extraction worker with this candidate
- * attached, so the worker publishes onto this candidate instead of reading
- * an identity from the affidavit. A PDF that is already stored, for this or
- * any other candidate, is refused rather than queued twice.
- */
-export async function handleCandidateAffidavitPublish(
-  actor: CuratorActor,
-  candidateId: number,
-  form: FormData,
-): Promise<CandidateAffidavitOutcome> {
-  const ecUrl = String(form.get('ecUrl') ?? '').trim();
-  const fileField = form.get('affidavitFile');
-  const hasFile = fileField instanceof File && fileField.size > 0;
-
-  if (!ecUrl && !hasFile) {
-    return { kind: 'validation_error', key: 'curator.candidateEdit.error.affidavitRequired' };
-  }
-  if (ecUrl && hasFile) {
-    return { kind: 'validation_error', key: 'curator.candidateEdit.error.affidavitBothProvided' };
-  }
-
-  const allowed = await checkDefaultLimit(actor.userId, 'upload');
-  if (!allowed) {
-    return { kind: 'validation_error', key: 'curator.candidateEdit.error.uploadRateLimited' };
-  }
-
-  let bytes: Buffer;
-  if (ecUrl) {
-    try {
-      bytes = await fetchAffidavitFromEc(ecUrl);
-    } catch (err) {
-      return { kind: 'validation_error', key: affidavitFetchErrorKey(err) };
-    }
-  } else {
-    bytes = Buffer.from(await (fileField as File).arrayBuffer());
-  }
-
-  const result = await enqueueAffidavit(bytes, { uploadedBy: actor.userId, originUrl: ecUrl || null, candidateId });
-  if (result.kind === 'rejected') {
-    return { kind: 'validation_error', key: affidavitStoreErrorKey(new Error(result.reason)) };
-  }
-  if (result.kind === 'duplicate') {
-    return { kind: 'validation_error', key: 'curator.candidateEdit.error.affidavitDuplicate' };
-  }
-
   return { kind: 'saved' };
 }
 
@@ -722,10 +523,10 @@ export async function searchCurator(q: string): Promise<CuratorSearch | null> {
   const pattern = likePattern(term);
 
   const hits = await db
-    .select({ id: candidates.id, nameEn: candidates.nameEn, partyEn: candidates.partyEn, status: candidates.status, wardId: wards.id, wardNameEn: wards.nameEn, wardNameKn: wards.nameKn })
+    .select({ id: candidates.id, ...candidateIdentitySelection(), status: candidates.status, wardId: wards.id, wardNameEn: wards.nameEn, wardNameKn: wards.nameKn })
     .from(candidates)
     .innerJoin(wards, eq(wards.id, candidates.wardId))
-    .where(or(ilike(candidates.nameEn, pattern), ilike(candidates.nameKn, pattern)))
+    .where(or(ilike(candidateIdentitySelection().nameEn, pattern), ilike(candidateIdentitySelection().nameKn, pattern)))
     .orderBy(candidates.nameEn, candidates.id)
     .limit(SEARCH_CAP + 1);
 
@@ -743,7 +544,7 @@ export async function searchCurator(q: string): Promise<CuratorSearch | null> {
 /** Every candidate of one ward, for the curator ward page. */
 export async function loadWardCandidates(wardId: number): Promise<Array<{ id: number; nameEn: string; partyEn: string; status: CandidateStatus }>> {
   return db
-    .select({ id: candidates.id, nameEn: candidates.nameEn, partyEn: candidates.partyEn, status: candidates.status })
+    .select({ id: candidates.id, ...candidateIdentitySelection(), status: candidates.status })
     .from(candidates)
     .where(eq(candidates.wardId, wardId))
     .orderBy(candidates.nameEn, candidates.id);

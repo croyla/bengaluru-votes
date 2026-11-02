@@ -14,6 +14,7 @@ import CandidateProfileField from '../../components/CandidateProfileField.astro'
 import EmptyState from '../../components/EmptyState.astro';
 import { t, localePath, type Lang } from '../../i18n';
 import { db } from '../../db/client';
+import { candidateIdentitySelection } from '../../lib/candidate-identity';
 import { candidates, candidateFields, candidateAffidavits, wards, media } from '../../db/schema';
 import { desc, eq } from 'drizzle-orm';
 import {
@@ -39,10 +40,7 @@ const [row] = await db
     wardId: candidates.wardId,
     wardNameEn: wards.nameEn,
     wardNameKn: wards.nameKn,
-    nameEn: candidates.nameEn,
-    nameKn: candidates.nameKn,
-    partyEn: candidates.partyEn,
-    partyKn: candidates.partyKn,
+    ...candidateIdentitySelection(),
     photoMediaId: candidates.photoMediaId,
     photoHash: media.sha256,
     status: candidates.status,

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { eq } from 'drizzle-orm';
 import { Fixtures, client, db, fieldRow, run, schema, tokenForm, ward, type Auth } from './support/staff-harness';
+import { loadFixCandidate, loadFixFields } from '../../src/lib/curator-fix';
 import { t } from '../../src/i18n';
 import CandidateRoute from '../../src/pages/curator/candidate/[id].astro';
 
@@ -32,12 +33,16 @@ describe('the candidate editor on structured fields', () => {
     const c = await fx.candidateWithAffidavit(WARD_A.id);
     const html = await (await page(c.candidateId)).text();
     expect(html).toContain(`src="${c.pdfUrl}#navpanes=0&#38;view=FitH"`);
-    for (const action of ['field:full_name', 'field:party', 'field:gender', 'field:age', 'field:education', 'field:assets', 'field:cases', 'ward']) {
-      expect(html).toContain(`name="formAction" value="${action}"`);
-    }
+    expect(html).toContain('name="formAction" value="fields"');
+    expect(html.match(/name="confirmPublish"/g)).toHaveLength(1);
+    expect(html.match(/type="submit"/g)).toHaveLength(1);
     expect(html).toContain('name="age" value="52"');
     expect(html).not.toContain('track_record');
     expect(html).not.toContain('name="nameEn"');
+    expect(html).not.toContain('name="nameKn"');
+    expect(html).not.toContain('name="partyKn"');
+    expect(html).not.toContain('name="photo"');
+    expect(html).not.toContain('Election status');
   });
 
   it('saves one field as a structured, person-checked value and leaves the others alone', async () => {
@@ -95,7 +100,7 @@ describe('the candidate editor on structured fields', () => {
     // Astro escapes the apostrophe in text.
     expect(html).toContain(t('en', 'curator.candidateEdit.fields.needAffidavit').replace("'", '&#39;'));
     expect(html).not.toContain('value="field:age"');
-    expect(html).toContain('value="affidavit"');
+    expect(html).not.toContain('value="affidavit"');
     const res = await page(candidateId, save('field:age', { 'status.age': 'value', age: '47' }));
     expect(res.status).toBe(400);
     expect(await fieldRow(candidateId, 'age')).toBeUndefined();
@@ -112,14 +117,72 @@ describe('the candidate editor on structured fields', () => {
     expect(html).not.toContain('value="field:age"');
   });
 
-  it('keeps the English name when the core card is saved', async () => {
+  it('status saves are forbidden', async () => {
     const c = await fx.candidateWithAffidavit(WARD_A.id);
     const before = (await candidateRow(c.candidateId)).nameEn;
     const res = await page(c.candidateId, tokenForm(curator, { formAction: 'core', status: 'contesting', nameKn: 'ಹೆಸರು', partyKn: '', nameEn: 'Smuggled Name' }));
-    expect(res.status).toBe(302);
+    expect(res.status).toBe(403);
     const row = await candidateRow(c.candidateId);
     expect(row.nameEn).toBe(before);
-    expect(row.nameKn).toBe('ಹೆಸರು');
-    expect(row.status).toBe('contesting');
+    expect(row.nameKn).toBeNull();
+    expect(row.status).toBe('filed');
+  });
+});
+
+async function batch(id: number, overrides: Record<string, string> = {}) {
+  const candidate = (await loadFixCandidate(id))!;
+  const fields = await loadFixFields(candidate);
+  const values: Record<string, string> = { wardId: String(candidate.wardId) };
+  for (const field of fields) {
+    values[`status.${field.key}`] = field.status;
+    Object.assign(values, field.inputs);
+  }
+  return save('fields', { ...values, ...overrides });
+}
+
+describe('one save for report-card and ward changes', () => {
+  it('saves multiple changes and ward together, leaving other provenance untouched', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    const before = await fieldRow(c.candidateId, 'cases');
+    const form = await batch(c.candidateId, { age: '48', party: 'Demo Corrected Party (FICTIONAL)', wardId: String(WARD_B.id) });
+    expect((await page(c.candidateId, form)).status).toBe(302);
+    expect((await fieldRow(c.candidateId, 'age'))!.checkedBy).toBe(curator.userId);
+    expect((await fieldRow(c.candidateId, 'party'))!.valueEn).toBe('Demo Corrected Party (FICTIONAL)');
+    expect(await fieldRow(c.candidateId, 'cases')).toEqual(before);
+    expect((await candidateRow(c.candidateId)).wardId).toBe(WARD_B.id);
+  });
+
+  it('invalid field prevents all changes and preserves every entered value', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    const form = await batch(c.candidateId, { age: '121', name: 'Changed Name (FICTIONAL)', wardId: String(WARD_B.id) });
+    const response = await page(c.candidateId, form);
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain('value="121"');
+    expect(html).toContain('value="Changed Name (FICTIONAL)"');
+    expect((await candidateRow(c.candidateId)).wardId).toBe(WARD_A.id);
+    expect((await candidateRow(c.candidateId)).nameEn).not.toBe('Changed Name (FICTIONAL)');
+    expect((await fieldRow(c.candidateId, 'age'))!.checkedBy).toBeNull();
+  });
+
+  it('invalid ward prevents otherwise valid field changes', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    expect((await page(c.candidateId, await batch(c.candidateId, { age: '48', wardId: '999999999' }))).status).toBe(400);
+    expect((await fieldRow(c.candidateId, 'age'))!.checkedBy).toBeNull();
+  });
+
+  it('requires confirmation and refuses an unchanged form without confirming AI data', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    const form = await batch(c.candidateId, { age: '48' });
+    form.delete('confirmPublish');
+    expect((await page(c.candidateId, form)).status).toBe(400);
+    expect((await page(c.candidateId, await batch(c.candidateId))).status).toBe(400);
+    expect((await fieldRow(c.candidateId, 'age'))!.checkedBy).toBeNull();
+  });
+
+  it('allows a ward-only change without marking any report-card field checked', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    expect((await page(c.candidateId, await batch(c.candidateId, { wardId: String(WARD_B.id) }))).status).toBe(302);
+    expect((await fieldRow(c.candidateId, 'age'))!.checkedBy).toBeNull();
   });
 });

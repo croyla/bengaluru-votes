@@ -56,6 +56,7 @@ import CandidateRow from '../../components/CandidateRow.astro';
 import type { CandidateRowCandidate } from '../../components/CandidateRow.astro';
 import { t, localePath, type Lang } from '../../i18n';
 import { db } from '../../db/client';
+import { candidateIdentitySelection } from '../../lib/candidate-identity';
 import {
   candidates,
   media,
@@ -94,10 +95,7 @@ const candidateRows = ward
       .select({
         id: candidates.id,
         slug: candidates.slug,
-        nameEn: candidates.nameEn,
-        nameKn: candidates.nameKn,
-        partyEn: candidates.partyEn,
-        partyKn: candidates.partyKn,
+        ...candidateIdentitySelection(),
         photoMediaId: candidates.photoMediaId,
         photoHash: media.sha256,
         status: candidates.status,

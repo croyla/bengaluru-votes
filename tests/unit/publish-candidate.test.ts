@@ -1,3 +1,4 @@
+import { publishAffidavitFields } from '../../src/lib/affidavit-publish';
 /**
  * Task 36 (candidate editor) — the src/lib/publish.ts extensions that don't
  * need an HTTP round trip to exercise: `publishCandidateCore`,
@@ -75,7 +76,9 @@ describe('src/lib/publish.ts — publishCandidateCore / createCandidate / publis
       await db.delete(schema.candidateStances).where(inArray(schema.candidateStances.wardIssueId, issueIds));
     }
     await db.delete(schema.wardIssues).where(inArray(schema.wardIssues.wardId, ALL_WARDS.map((w) => w.id)));
-    await db.delete(schema.candidates).where(inArray(schema.candidates.wardId, ALL_WARDS.map((w) => w.id)));
+    const allCandidates = await db.select({ id: schema.candidates.id }).from(schema.candidates).where(inArray(schema.candidates.wardId, ALL_WARDS.map((w) => w.id)));
+  if (allCandidates.length) await db.delete(schema.candidateFields).where(inArray(schema.candidateFields.candidateId, allCandidates.map(c => c.id)));
+  await db.delete(schema.candidates).where(inArray(schema.candidates.wardId, ALL_WARDS.map((w) => w.id)));
     await client.end();
   });
 
@@ -94,14 +97,6 @@ describe('src/lib/publish.ts — publishCandidateCore / createCandidate / publis
         })
         .returning({ id: schema.candidates.id });
       candidateId = row!.id;
-    });
-
-    it('a core edit that does NOT touch status updates the field and leaves status alone', async () => {
-      await publishCandidateCore(ACTOR, { candidateId, partyEn: 'Renamed Party' });
-
-      const [candidate] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, candidateId));
-      expect(candidate?.partyEn).toBe('Renamed Party');
-      expect(candidate?.status).toBe('filed');
     });
 
     it('a STATUS transition is written', async () => {
@@ -142,7 +137,7 @@ describe('src/lib/publish.ts — publishCandidateCore / createCandidate / publis
     it('slug is stable on rename — publishCandidateCore never touches slug', async () => {
       const created = await createCandidate(ACTOR, { wardId: WARD_OTHER.id, nameEn: 'Original Name', partyEn: 'Independent' });
 
-      await publishCandidateCore(ACTOR, { candidateId: created.id, nameEn: 'Renamed After Filing' });
+      await db.transaction(tx => publishAffidavitFields(tx, ACTOR, created.id, [{ key: 'full_name', status: 'value', text: 'Renamed After Filing' }], { sourceUrl: '/media/test/affidavit', checked: true }));
 
       const [candidate] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, created.id));
       expect(candidate?.nameEn).toBe('Renamed After Filing');

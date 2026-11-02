@@ -250,6 +250,14 @@ describe('Candidate comparison (/ward/{id}/compare) — IA §3.5, PRD §5.3', ()
       };
     });
     await db.insert(schema.candidates).values(manyValues);
+    const identities = await db.select().from(schema.candidates).where(eq(schema.candidates.wardId, WARD.id));
+    for (const c of identities) {
+      await db.insert(schema.candidateFields).values([
+        { candidateId: c.id, fieldKey: 'full_name', valueEn: c.nameEn, valueKn: c.nameKn },
+        { candidateId: c.id, fieldKey: 'party', valueEn: c.partyEn, valueKn: c.partyKn },
+      ]).onConflictDoNothing();
+      await db.update(schema.candidates).set({ nameKn: 'STALE Kannada name', partyKn: 'STALE Kannada party' }).where(eq(schema.candidates.id, c.id));
+    }
   });
 
   afterAll(async () => {

@@ -189,6 +189,8 @@ async function resetFixtures(): Promise<void> {
   if (candidateIds.length > 0) {
     await db.delete(schema.candidateFields).where(inArray(schema.candidateFields.candidateId, candidateIds));
   }
+  const allCandidates = await db.select({ id: schema.candidates.id }).from(schema.candidates).where(inArray(schema.candidates.wardId, ALL_WARDS.map((w) => w.id)));
+  if (allCandidates.length) await db.delete(schema.candidateFields).where(inArray(schema.candidateFields.candidateId, allCandidates.map(c => c.id)));
   await db.delete(schema.candidates).where(inArray(schema.candidates.wardId, ALL_WARDS.map((w) => w.id)));
 }
 
@@ -249,8 +251,8 @@ describe('/curator/candidate/{id}, /curator/candidate/new (Task 36) — IA §5.4
     });
   });
 
-  describe('core form — Kannada name/party, and status change', () => {
-    it('a STATUS transition is published', async () => {
+  describe('election status form', () => {
+    it('a STATUS transition is forbidden', async () => {
       const form = coreForm({ status: 'contesting' }, curatorAuth.token);
       const res = await run(CandidateEditRoute, `/curator/candidate/${candidateStatusClear}`, {
         method: 'POST',
@@ -258,10 +260,10 @@ describe('/curator/candidate/{id}, /curator/candidate/new (Task 36) — IA §5.4
         params: { id: String(candidateStatusClear) },
         form,
       });
-      expect(res.status).toBe(302);
+      expect(res.status).toBe(403);
 
       const [candidate] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, candidateStatusClear));
-      expect(candidate?.status).toBe('contesting');
+      expect(candidate?.status).toBe('filed');
     });
   });
 
@@ -280,8 +282,8 @@ describe('/curator/candidate/{id}, /curator/candidate/new (Task 36) — IA §5.4
     });
   });
 
-  describe('photo upload — storeMedia', () => {
-    it('a valid PNG sets photoMediaId', async () => {
+  describe('removed photo inputs', () => {
+    it('ignores a photo posted by an old form', async () => {
       const form = coreForm({ nameKn: 'ಮರುನಾಮಕರಣ', status: 'filed' }, curatorAuth.token);
       form.set('photo', new File([PNG_BYTES], 'photo.png', { type: 'image/png' }));
 
@@ -291,16 +293,14 @@ describe('/curator/candidate/{id}, /curator/candidate/new (Task 36) — IA §5.4
         params: { id: String(candidateA) },
         form,
       });
-      expect(res.status).toBe(302);
+      expect(res.status).toBe(403);
 
       const [candidate] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, candidateA));
-      expect(candidate?.photoMediaId).not.toBeNull();
-
-      const [mediaRow] = await db.select().from(schema.media).where(eq(schema.media.id, candidate!.photoMediaId!));
-      expect(mediaRow?.contentType).toBe('image/png');
+      expect(candidate?.photoMediaId).toBeNull();
+      expect(candidate?.nameKn).toBeNull();
     });
 
-    it('an SVG masquerading as a photo is rejected — no corruption, candidate unchanged', async () => {
+    it('ignores unsupported photo bytes without storing them', async () => {
       const [before] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, candidateA));
 
       const form = coreForm({ nameKn: 'Should Not Apply', status: 'filed' }, curatorAuth.token);
@@ -312,14 +312,14 @@ describe('/curator/candidate/{id}, /curator/candidate/new (Task 36) — IA §5.4
         params: { id: String(candidateA) },
         form,
       });
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
 
       const [after] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, candidateA));
       expect(after?.nameKn).toBe(before?.nameKn);
       expect(after?.photoMediaId).toBe(before?.photoMediaId);
     });
 
-    it('a valid photo with an INVALID status -> 400, no media row created, no rate-limit consumed (orphaned-media invariant)', async () => {
+    it('a valid photo with an INVALID status -> 403, no media row created, no rate-limit consumed (orphaned-media invariant)', async () => {
       const [before] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, candidateA));
       const [mediaCountBefore] = await db
         .select({ count: sql<number>`count(*)::int` })
@@ -337,7 +337,7 @@ describe('/curator/candidate/{id}, /curator/candidate/new (Task 36) — IA §5.4
         params: { id: String(candidateA) },
         form,
       });
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
 
       const [after] = await db.select().from(schema.candidates).where(eq(schema.candidates.id, candidateA));
       expect(after?.nameKn).toBe(before?.nameKn);

@@ -191,14 +191,14 @@ describe('seed-dev', () => {
       expect(demoCandidates).toHaveLength(2);
       for (const c of demoCandidates) {
         expect(c.nameEn).toMatch(/FICTIONAL/);
-        expect(c.nameKn).toMatch(/ಕಾಲ್ಪನಿಕ/);
         expect(c.partyEn).toMatch(/FICTIONAL/);
-        expect(c.partyKn).toMatch(/ಕಾಲ್ಪನಿಕ/);
 
         const fields = await db
           .select()
           .from(schema.candidateFields)
           .where(eq(schema.candidateFields.candidateId, c.id));
+        expect(fields.find(f => f.fieldKey === 'full_name')?.valueKn).toMatch(/ಕಾಲ್ಪನಿಕ/);
+        expect(fields.find(f => f.fieldKey === 'party')?.valueKn).toMatch(/ಕಾಲ್ಪನಿಕ/);
         expect(new Set(fields.map((field) => field.fieldKey))).toEqual(
           new Set(['full_name', 'ward', 'party', 'gender', 'age', 'education', 'assets', 'cases', 'ec_affidavit']),
         );

@@ -194,14 +194,12 @@ export async function seedDev(db: Db): Promise<SeedDevResult> {
           slug,
           wardId,
           nameEn,
-          nameKn,
           partyEn: party.en,
-          partyKn: party.kn,
           status: 'contesting',
         })
         .onConflictDoUpdate({
           target: schema.candidates.slug,
-          set: { wardId, nameEn, nameKn, partyEn: party.en, partyKn: party.kn, status: 'contesting' },
+          set: { wardId, nameEn, partyEn: party.en, status: 'contesting' },
         })
         .returning({ id: schema.candidates.id });
       if (!candidate) throw new Error(`seed-dev: failed to seed ${slug}`);

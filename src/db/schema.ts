@@ -99,9 +99,9 @@ export const candidates = pgTable('candidates', {
   slug: text('slug').notNull().unique(),               // ward is part of the slug (IA §3.4)
   wardId: integer('ward_id').notNull().references(() => wards.id),
   nameEn: text('name_en').notNull(),
-  nameKn: text('name_kn'),
+  nameKn: text('name_kn'), // legacy only; migrated to candidate_fields by 0014
   partyEn: text('party_en').notNull(),                 // 'Independent' allowed
-  partyKn: text('party_kn'),
+  partyKn: text('party_kn'), // legacy only; display uses the report-card translation
   photoMediaId: integer('photo_media_id').references(() => media.id),
   status: candidateStatusEnum('status').notNull().default('filed'),
   createdAt: timestamp('created_at').notNull().defaultNow(),

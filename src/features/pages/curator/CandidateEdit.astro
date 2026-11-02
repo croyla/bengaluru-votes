@@ -1,48 +1,8 @@
 ---
 /**
- * `/curator/candidate/{id}` and `/curator/candidate/new?ward={id}` (Task 36,
- * information-architecture.md §5.4; PRD §5.2/§9.1/§11; architecture §6) — the
- * curator candidate editor. Every route twin
- * (src/pages/curator/candidate/[id].astro, .../new.astro) is responsible for
- * the 404 existence check BEFORE rendering this component — see those
- * files' docstrings and src/lib/curator.ts's module docstring for the same
- * convention used by the queue-item editor (Task 34).
- *
- * LAYOUT: with a stored affidavit the scan stays on the left and the forms
- * are on the right (`CuratorSplit`); without one, or on the `new` route,
- * there is one column.
- *
- * INDEPENDENT FORMS, each its own `<form>` posting back to the same URL
- * with a distinct hidden `formAction` value (mirrors QueueItem.astro's
- * accept/reject split):
- *   - `formAction=core` — Kannada name and party, photo and status (or, on
- *     the `new` route, English and Kannada name and party and the photo;
- *     status is always the schema default there). The English name and
- *     party are the `full_name` and `party` fields below, which have one
- *     writer.
- *   - `formAction=field:{key}`, one per affidavit field (name, party,
- *     gender, age, education, assets, cases): that field's structured
- *     inputs, checked against the stored affidavit, with the required
- *     "publishes immediately" tick. With no affidavit there is nothing to
- *     check against, so these forms are replaced by a line asking for it
- *     (or, when a transcriber sent it back, pointing to it in Matching).
- *   - `formAction=ward` — the ward the candidate belongs in.
- *
- * After a refused save the route twin passes `refused` (which form, and
- * exactly what was posted) and that form shows it instead of the
- * published value.
- *
- * AFFIDAVIT (Task 37, architecture §7/§13, PRD §5.2): TWO independent forms
- * (`formAction=affidavit`, disambiguated server-side by which of
- * `affidavitFile` / `ecUrl` is present) — an upload (curator picks a PDF
- * off disk) and an EC-link fetch (curator pastes the official EC affidavit
- * URL; src/lib/affidavit-fetch.ts does the SSRF-hardened fetch). Either
- * path lands the same way: `storeMedia(kind:'affidavit')`, a new
- * `candidate_affidavits` row, then AI extraction populates the three
- * extracted fields immediately (marked AI-extracted, cleared the moment a
- * curator re-confirms one — Task 5's rule, unchanged here). The stored
- * affidavit list shows each PDF's link, its source (uploaded vs. the EC URL
- * it came from), and its extraction status.
+ * Candidate corrections share one confirmation and atomic save for changed
+ * report-card fields and ward. Status and affidavit ingestion live outside
+ * this page; the affidavit remains visible alongside the inputs.
  */
 import CuratorLayout from '../../../layouts/CuratorLayout.astro';
 import Card from '../../../components/Card.astro';
@@ -51,7 +11,7 @@ import Button from '../../../components/Button.astro';
 import FormField from '../../../components/FormField.astro';
 import CuratorSplit from '../../../components/CuratorSplit.astro';
 import CuratorFieldForm from '../../../components/CuratorFieldForm.astro';
-import CuratorWardForm from '../../../components/CuratorWardForm.astro';
+import type { CandidateBatchRefusal } from '../../../lib/curator-fix';
 import { t, type Lang } from '../../../i18n';
 import { CSRF_FIELD_NAME } from '../../../lib/csrf';
 import { CANDIDATE_PROFILE_LABEL_KEYS } from '../../../lib/candidate-profile';
@@ -72,9 +32,10 @@ interface Props {
   message?: { kind: 'notice' | 'error'; key: string };
   /** The form that was refused and what was posted into it. */
   refused?: { formAction: string; error?: FieldError; raw?: RawField };
+  batchRefused?: CandidateBatchRefusal;
 }
 
-const { lang, csrfToken, wardId, wardNameEn, wardNameKn, candidate, wards = [], message, refused } = Astro.props;
+const { lang, csrfToken, wardId, wardNameEn, wardNameKn, candidate, wards = [], message, refused, batchRefused } = Astro.props;
 const isNew = candidate === undefined;
 const wardName = lang === 'kn' ? wardNameKn : wardNameEn;
 const messageText = message ? t(lang, message.key) : undefined;
@@ -105,9 +66,9 @@ const formTarget = isNew ? `/curator/candidate/new?ward=${wardId}` : `/curator/c
       )
     }
 
-    <Card>
-      <h2>{t(lang, 'curator.candidateEdit.core.heading')}</h2>
-      <form method="post" action={formTarget} enctype="multipart/form-data">
+    {isNew && <Card>
+      <h2>{t(lang, isNew ? 'curator.candidateEdit.new.detailsHeading' : 'curator.candidateEdit.core.heading')}</h2>
+      <form method="post" action={formTarget}>
         <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
         <input type="hidden" name="formAction" value="core" />
 
@@ -116,53 +77,9 @@ const formTarget = isNew ? `/curator/candidate/new?ward=${wardId}` : `/curator/c
             <FormField label={t(lang, 'curator.candidateEdit.core.nameEnLabel')} name="nameEn" required lang={lang} />
           )
         }
-        <FormField
-          label={t(lang, 'curator.candidateEdit.core.nameKnLabel')}
-          name="nameKn"
-          value={candidate?.nameKn ?? undefined}
-          lang={lang}
-        />
         {
           isNew && (
             <FormField label={t(lang, 'curator.candidateEdit.core.partyEnLabel')} name="partyEn" required lang={lang} />
-          )
-        }
-        <FormField
-          label={t(lang, 'curator.candidateEdit.core.partyKnLabel')}
-          name="partyKn"
-          value={candidate?.partyKn ?? undefined}
-          lang={lang}
-        />
-
-        <div class="form-field">
-          <label class="form-label" for="core-photo">
-            {t(lang, 'curator.candidateEdit.core.photoLabel')}
-          </label>
-          {candidate?.photoUrl && (
-            <p class="meta">
-              {t(lang, 'curator.candidateEdit.core.photoCurrent')}{' '}
-              <a href={candidate.photoUrl} target="_blank" rel="noopener noreferrer">
-                {candidate.photoUrl}
-              </a>
-            </p>
-          )}
-          <input id="core-photo" class="form-input" type="file" name="photo" accept="image/png,image/jpeg,image/webp" />
-        </div>
-
-        {
-          !isNew && (
-            <div class="form-field">
-              <label class="form-label" for="core-status">
-                {t(lang, 'curator.candidateEdit.core.statusLabel')}
-              </label>
-              <select id="core-status" class="form-input" name="status">
-                {(['filed', 'contesting', 'rejected', 'withdrawn'] as const).map((s) => (
-                  <option value={s} selected={candidate!.status === s}>
-                    {t(lang, `curator.candidateEdit.core.status.${s}`)}
-                  </option>
-                ))}
-              </select>
-            </div>
           )
         }
 
@@ -170,19 +87,22 @@ const formTarget = isNew ? `/curator/candidate/new?ward=${wardId}` : `/curator/c
           {isNew ? t(lang, 'curator.candidateEdit.core.createSubmit') : t(lang, 'curator.candidateEdit.core.submit')}
         </Button>
       </form>
-    </Card>
+    </Card>}
 
     {
       !isNew && (
         <Card>
           <h2>{t(lang, 'curator.candidateEdit.fields.heading')}</h2>
           {candidate!.pdfUrl ? (
-            <div class="field-cards">
+            <form method="post" class="field-cards">
+              <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+              <input type="hidden" name="formAction" value="fields" />
               {candidate!.fields.map((field) => {
                 const formAction = `field:${field.key}`;
                 const own = refused?.formAction === formAction;
                 return (
                   <CuratorFieldForm
+                    embedded
                     lang={lang}
                     csrfToken={csrfToken}
                     formAction={formAction}
@@ -190,21 +110,23 @@ const formTarget = isNew ? `/curator/candidate/new?ward=${wardId}` : `/curator/c
                     label={t(lang, CANDIDATE_PROFILE_LABEL_KEYS[field.key])}
                     confirmPath={confirmPath}
                     submitLabel={t(lang, 'curator.candidateEdit.field.submit')}
-                    error={own ? refused?.error : undefined}
-                    raw={own ? refused?.raw : undefined}
+                    error={batchRefused?.errors[field.key] ?? (own ? refused?.error : undefined)}
+                    raw={batchRefused?.raw[field.key] ?? (own ? refused?.raw : undefined)}
                   />
                 );
               })}
-              <CuratorWardForm
-                lang={lang}
-                csrfToken={csrfToken}
-                formAction="ward"
-                wards={wards}
-                wardId={candidate!.wardId}
-                confirmPath={confirmPath}
-                submitLabel={t(lang, 'curator.fix.wardSubmit')}
-              />
-            </div>
+              <div class="form-field">
+                <label class="form-label" for="fix-ward">{t(lang, 'curator.fix.wardLabel')}</label>
+                <select id="fix-ward" name="wardId" class="form-input" required>
+                  {wards.map((ward) => <option value={ward.id} selected={String(ward.id) === (batchRefused?.wardId ?? String(candidate!.wardId))}>{ward.label}</option>)}
+                </select>
+              </div>
+              <label class="batch-confirm">
+                <input type="checkbox" name="confirmPublish" required />
+                <span>{t(lang, 'curator.candidateEdit.confirmChanges')}</span>
+              </label>
+              <Button type="submit" variant="primary" lang={lang}>{t(lang, 'curator.candidateEdit.field.submit')}</Button>
+            </form>
           ) : candidate!.waitingAffidavitId !== null ? (
             <p class="placeholder-note">
               {t(lang, 'curator.fix.affidavitWaiting')} <a href={`/curator/matching/${candidate!.waitingAffidavitId}`}>{t(lang, 'curator.fix.affidavitWaitingLink')}</a>
@@ -216,72 +138,13 @@ const formTarget = isNew ? `/curator/candidate/new?ward=${wardId}` : `/curator/c
       )
     }
 
-    {
-      !isNew && (
-        <Card>
-          <h2>{t(lang, 'curator.candidateEdit.affidavit.heading')}</h2>
-
-          <h3>{t(lang, 'curator.candidateEdit.affidavit.existingHeading')}</h3>
-          {candidate!.affidavits.length === 0 ? (
-            <p class="placeholder-note">{t(lang, 'curator.candidateEdit.affidavit.noneYet')}</p>
-          ) : (
-            <ul class="affidavit-list">
-              {candidate!.affidavits.map((a) => (
-                <li class="affidavit-item">
-                  <a href={a.mediaUrl} target="_blank" rel="noopener noreferrer">
-                    {t(lang, 'curator.candidateEdit.affidavit.viewPdf')}
-                  </a>
-                  <span class="meta">
-                    {a.originUrl
-                      ? `${t(lang, 'curator.candidateEdit.affidavit.sourceEcLink')} ${a.originUrl}`
-                      : t(lang, 'curator.candidateEdit.affidavit.sourceUpload')}
-                  </span>
-                  <span class={`status-badge status-${a.extractionStatus}`}>
-                    {t(lang, `curator.candidateEdit.affidavit.status.${a.extractionStatus}`)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <h3>{t(lang, 'curator.candidateEdit.affidavit.uploadHeading')}</h3>
-          <form method="post" action={formTarget} enctype="multipart/form-data">
-            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-            <input type="hidden" name="formAction" value="affidavit" />
-            <div class="form-field">
-              <label class="form-label" for="affidavit-file">
-                {t(lang, 'curator.candidateEdit.affidavit.uploadLabel')}
-              </label>
-              <input id="affidavit-file" class="form-input" type="file" name="affidavitFile" accept="application/pdf" />
-            </div>
-            <Button type="submit" variant="secondary" lang={lang}>
-              {t(lang, 'curator.candidateEdit.affidavit.uploadSubmit')}
-            </Button>
-          </form>
-
-          <h3>{t(lang, 'curator.candidateEdit.affidavit.ecUrlHeading')}</h3>
-          <form method="post" action={formTarget}>
-            <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-            <input type="hidden" name="formAction" value="affidavit" />
-            <FormField
-              label={t(lang, 'curator.candidateEdit.affidavit.ecUrlLabel')}
-              name="ecUrl"
-              type="text"
-              helper={t(lang, 'curator.candidateEdit.affidavit.ecUrlHelper')}
-              lang={lang}
-            />
-            <Button type="submit" variant="secondary" lang={lang}>
-              {t(lang, 'curator.candidateEdit.affidavit.ecUrlSubmit')}
-            </Button>
-          </form>
-        </Card>
-      )
-    }
-
   </CuratorSplit>
 </CuratorLayout>
 
 <style>
+  .batch-confirm { display: flex; align-items: flex-start; gap: var(--space-2); font-weight: 700; cursor: pointer; }
+  .batch-confirm input { width: 20px; height: 20px; flex: none; accent-color: var(--color-primary); }
+
   h1 {
     font-size: var(--text-2xl);
     line-height: var(--leading-2xl);
@@ -346,9 +209,10 @@ const formTarget = isNew ? `/curator/candidate/new?ward=${wardId}` : `/curator/c
   }
 
   .field-cards {
+    max-width: none;
     display: flex;
     flex-direction: column;
-    gap: var(--space-6);
+    gap: var(--space-4);
   }
 
   .placeholder-note {
@@ -358,35 +222,4 @@ const formTarget = isNew ? `/curator/candidate/new?ward=${wardId}` : `/curator/c
     font-style: italic;
   }
 
-  .affidavit-list {
-    list-style: none;
-    margin: 0 0 var(--space-4);
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .affidavit-item {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) 0;
-    border-bottom: 1px solid var(--color-border);
-    font-size: var(--text-sm);
-  }
-
-  .status-badge {
-    padding: 0 var(--space-2);
-    border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
-    background: var(--color-surface);
-    color: var(--color-text-muted);
-  }
-
-  .status-badge.status-failed {
-    background: var(--color-danger-surface);
-    color: var(--color-danger);
-  }
 </style>

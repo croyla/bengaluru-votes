@@ -141,7 +141,7 @@ describe('Candidate report card (/candidate/{slug}, /kn/candidate/{slug}) — IA
         slug: MAIN_SLUG,
         wardId: WARD.id,
         nameEn: 'Report Card Test Candidate',
-        nameKn: 'ವರದಿ ಪತ್ರ ಪರೀಕ್ಷಾ ಅಭ್ಯರ್ಥಿ',
+        nameKn: 'STALE Kannada name',
         partyEn: 'Independent',
         photoMediaId: photo.id,
         status: 'contesting',
@@ -156,6 +156,8 @@ describe('Candidate report card (/candidate/{slug}, /kn/candidate/{slug}) — IA
       state: 'published',
     });
     await db.insert(schema.candidateFields).values([
+      { candidateId: mainCandidateId, fieldKey: 'full_name', valueEn: 'Report Card Test Candidate', valueKn: 'ವರದಿ ಪತ್ರ ಪರೀಕ್ಷಾ ಅಭ್ಯರ್ಥಿ' },
+      { candidateId: mainCandidateId, fieldKey: 'party', valueEn: 'Independent', valueKn: 'ಸ್ವತಂತ್ರ' },
       {
         candidateId: mainCandidateId,
         fieldKey: 'gender',
@@ -247,7 +249,7 @@ describe('Candidate report card (/candidate/{slug}, /kn/candidate/{slug}) — IA
 
       const expectedName = lang === 'kn' ? 'ವರದಿ ಪತ್ರ ಪರೀಕ್ಷಾ ಅಭ್ಯರ್ಥಿ' : 'Report Card Test Candidate';
       expect(html).toContain(expectedName);
-      expect(html).toContain('Independent');
+      expect(html).toContain(lang === 'kn' ? 'ಸ್ವತಂತ್ರ' : 'Independent');
       expect(html).toContain('Woman');
       expect(html).toContain(`href="${localePath(lang, `/ward/${WARD.id}`)}"`);
       for (const key of ['fullName', 'ward', 'partyName', 'gender', 'age', 'education', 'assets', 'cases', 'ecAffidavit']) {

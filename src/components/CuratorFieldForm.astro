@@ -16,6 +16,7 @@ import type { FieldError, RawField } from '../lib/affidavit-form';
 import type { FixField } from '../lib/curator-fix';
 
 interface Props {
+  embedded?: boolean;
   lang: Lang;
   csrfToken: string;
   formAction: string;
@@ -28,12 +29,13 @@ interface Props {
   raw?: RawField;
 }
 
-const { lang, csrfToken, formAction, field, label, confirmPath, submitLabel, error, raw } = Astro.props;
+const { embedded = false, lang, csrfToken, formAction, field, label, confirmPath, submitLabel, error, raw } = Astro.props;
+const Wrapper = embedded ? 'div' : 'form';
 ---
 
-<form method="post">
-  <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
-  <input type="hidden" name="formAction" value={formAction} />
+<Wrapper method={embedded ? undefined : "post"}>
+  {!embedded && <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />}
+  {!embedded && <input type="hidden" name="formAction" value={formAction} />}
   <fieldset class:list={['field', { 'field--error': error }]} data-field={field.key}>
     <legend>
       <span class="field-name">{label}</span>
@@ -46,15 +48,15 @@ const { lang, csrfToken, formAction, field, label, confirmPath, submitLabel, err
       }
     </legend>
     <AffidavitFieldInputs lang={lang} fieldKey={field.key} status={raw?.status ?? field.status} inputs={raw?.inputs ?? field.inputs} error={error} />
-    <label class="confirm">
+    {!embedded && <><label class="confirm">
       <input type="checkbox" name="confirmPublish" required />
       <span>{t(lang, 'curator.fix.confirm', { path: confirmPath })}</span>
     </label>
     <div class="actions">
       <Button type="submit" variant="primary" lang={lang}>{submitLabel}</Button>
-    </div>
+    </div></>}
   </fieldset>
-</form>
+</Wrapper>
 
 <style>
   form {

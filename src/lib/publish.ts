@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db, type Tx } from '../db/client';
-import { candidateStances, candidates, type candidateStatusEnum } from '../db/schema';
+import { candidateStances, candidateFields, candidates, type candidateStatusEnum } from '../db/schema';
 import { translateFieldSoon } from './translate-runtime';
 
 export type Actor = {
@@ -119,50 +119,24 @@ async function generateUniqueSlug(tx: Tx, wardId: number, nameEn: string): Promi
   }
 }
 
+/** Lifecycle status is the only editable property outside report-card fields. */
 export type PublishCandidateCoreInput = {
   candidateId: number;
-  nameEn?: string;
-  nameKn?: string | null;
-  partyEn?: string;
-  partyKn?: string | null;
-  photoMediaId?: number | null;
-  status?: CandidateStatus;
+  status: CandidateStatus;
 };
 
-/**
- * Updates a candidate's core (non-report-card) fields — name, party, photo,
- * lifecycle status in one transaction. Any field
- * left `undefined` is left unchanged; pass `null` for `nameKn`/`partyKn`/
- * `photoMediaId` to explicitly clear them.
- */
 export async function publishCandidateCore(_actor: Actor, input: PublishCandidateCoreInput): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(candidates).where(eq(candidates.id, input.candidateId));
-    if (!existing) {
-      throw new Error(`publishCandidateCore: no candidate with id ${input.candidateId}`);
-    }
-
-    const next = {
-      nameEn: input.nameEn ?? existing.nameEn,
-      nameKn: input.nameKn === undefined ? existing.nameKn : input.nameKn,
-      partyEn: input.partyEn ?? existing.partyEn,
-      partyKn: input.partyKn === undefined ? existing.partyKn : input.partyKn,
-      photoMediaId: input.photoMediaId === undefined ? existing.photoMediaId : input.photoMediaId,
-      status: input.status ?? existing.status,
-      updatedAt: new Date(),
-    };
-
-    await tx.update(candidates).set(next).where(eq(candidates.id, input.candidateId));
-  });
+  const [row] = await db.update(candidates)
+    .set({ status: input.status, updatedAt: new Date() })
+    .where(eq(candidates.id, input.candidateId))
+    .returning({ id: candidates.id });
+  if (!row) throw new Error(`publishCandidateCore: no candidate with id ${input.candidateId}`);
 }
 
 export type CreateCandidateInput = {
   wardId: number;
   nameEn: string;
   partyEn: string;
-  nameKn?: string | null;
-  partyKn?: string | null;
-  photoMediaId?: number | null;
 };
 
 /**
@@ -175,7 +149,11 @@ export async function createCandidate(
   _actor: Actor,
   input: CreateCandidateInput,
 ): Promise<{ id: number; slug: string }> {
-  return db.transaction((tx) => createCandidateTx(tx, input));
+  const result = await db.transaction((tx) => createCandidateTx(tx, input));
+  const fields = await db.select({ id: candidateFields.id }).from(candidateFields)
+    .where(eq(candidateFields.candidateId, result.id));
+  for (const field of fields) translateFieldSoon({ table: 'candidate_fields', id: field.id });
+  return result;
 }
 
 /** {@link createCandidate} inside the caller's transaction, for callers that create a candidate and publish onto it together. */
@@ -188,13 +166,18 @@ export async function createCandidateTx(tx: Tx, input: CreateCandidateInput): Pr
       slug,
       wardId: input.wardId,
       nameEn: input.nameEn,
-      nameKn: input.nameKn ?? null,
       partyEn: input.partyEn,
-      partyKn: input.partyKn ?? null,
-      photoMediaId: input.photoMediaId ?? null,
     })
     .returning({ id: candidates.id });
 
+  // Bootstrap the same report-card rows that extraction and human review update.
+  // Creating a record is not an affidavit check: leave the check markers empty.
+  await tx.insert(candidateFields).values([
+    { candidateId: row!.id, fieldKey: 'full_name', valueEn: input.nameEn,
+      valueData: { key: 'full_name', status: 'value', text: input.nameEn } },
+    { candidateId: row!.id, fieldKey: 'party', valueEn: input.partyEn,
+      valueData: { key: 'party', status: 'value', text: input.partyEn } },
+  ]);
   return { id: row!.id, slug };
 }
 
