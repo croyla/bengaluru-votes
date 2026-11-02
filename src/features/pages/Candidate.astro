@@ -10,6 +10,7 @@ import Base from '../../layouts/Base.astro';
 import Banner from '../../components/Banner.astro';
 import Button from '../../components/Button.astro';
 import Card from '../../components/Card.astro';
+import AffidavitScan from '../../components/AffidavitScan.astro';
 import CandidateProfileField from '../../components/CandidateProfileField.astro';
 import EmptyState from '../../components/EmptyState.astro';
 import { t, localePath, type Lang } from '../../i18n';
@@ -189,22 +190,31 @@ const candidateJsonLd = row
           {t(lang, 'common.flagError')}
         </Button>
 
-        <Card>
-          <div class="field-rows">
-            {profileFields.map((field) => (
-              <CandidateProfileField
-                label={field.label}
-                value={field.value}
-                valueUrl={field.valueUrl}
-                notDeclared={field.notDeclared}
-                unreadable={field.unreadable}
-                aiExtracted={field.aiExtracted}
-                showVerification={field.key !== 'ec_affidavit'}
-                lang={lang}
-              />
-            ))}
+        <div class:list={['report-layout', { 'report-layout--with-pdf': affidavitUrl }]}>
+          <div class="report-fields">
+            <Card>
+              <div class="field-rows">
+                {profileFields.map((field) => (
+                  <CandidateProfileField
+                    label={field.label}
+                    value={field.value}
+                    valueUrl={field.valueUrl}
+                    notDeclared={field.notDeclared}
+                    unreadable={field.unreadable}
+                    aiExtracted={field.aiExtracted}
+                    showVerification={field.key !== 'ec_affidavit'}
+                    lang={lang}
+                  />
+                ))}
+              </div>
+            </Card>
           </div>
-        </Card>
+          {affidavitUrl && (
+            <aside class="report-pdf" aria-label={t(lang, 'transcribe.reading.pdfTitle')}>
+              <AffidavitScan lang={lang} pdfUrl={affidavitUrl} />
+            </aside>
+          )}
+        </div>
 
         <nav class="candidate-links" aria-label={t(lang, 'candidate.links.label')}>
           <a href={localePath(lang, `/ward/${row.wardId}/compare`)}>{t(lang, 'candidate.links.compare')}</a>
@@ -224,6 +234,40 @@ const candidateJsonLd = row
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
+  }
+
+  .report-fields {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .report-pdf {
+    display: none;
+  }
+
+  @media (min-width: 768px) {
+    .report-layout--with-pdf {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+      gap: var(--space-6);
+      align-items: start;
+    }
+
+    .report-pdf {
+      display: flex;
+      position: sticky;
+      top: calc(80px + var(--space-4));
+      height: calc(100dvh - 80px - var(--space-8));
+      min-width: 0;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .report-pdf :global(.scan) {
+      width: 100%;
+      border-right: 0;
+    }
   }
 
   .provisional-marker {

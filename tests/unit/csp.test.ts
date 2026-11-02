@@ -107,6 +107,11 @@ describe('src/lib/csp.ts#buildCsp', () => {
   });
 
   describe('ward detail extension (anonymous-vote reCAPTCHA v3)', () => {
+    it.each(['/candidate/example', '/kn/candidate/example/'])('%s allows only same-site PDFs and CAPTCHA frames', (pathname) => {
+      const frame = buildCsp(NONCE, pathname).split(';').map((part) => part.trim()).find((part) => part.startsWith('frame-src '));
+      expect(frame).toBe("frame-src https://www.google.com 'self'");
+    });
+
     it.each(['/ward/57', '/kn/ward/57', '/ward/57/', '/candidate/some-slug', '/kn/candidate/some-slug/'])('%s permits the reCAPTCHA script and frame', (pathname) => {
       const csp = buildCsp(NONCE, pathname);
       expect(csp).toContain('https://www.google.com');

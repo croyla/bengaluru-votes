@@ -493,3 +493,7 @@ These are remaining differences between the design standard and the implementati
 - The single-line field component generates ids from `name`; repeated instances need an explicit uniqueness strategy. It does not expose every control/state described in §7.10.
 - Disabled links and prevention of duplicate submissions remain caller responsibilities; shared button state styling alone does not enforce them.
 - The stock basemap exception remains as described in §8.1. Font-family changes beyond the current stacks remain a separate design decision.
+
+### Read-only document comparison
+
+Place structured information on the left and its source PDF on the right using a 40/60 split from 768px. Keep both columns shrinkable and allow long values to wrap. The PDF panel stays beneath the sticky header, fits within the remaining viewport height, and scrolls internally. Reuse `AffidavitScan` for its localized title and new-tab link. Below 768px, hide the embedded viewer and keep the source link in the information panel opening a new tab. Without a document, retain the single-column layout. Candidate report cards use this pattern.

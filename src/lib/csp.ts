@@ -138,7 +138,8 @@ export function buildCsp(nonce: string, pathname: string): string {
   const scriptSrcHosts = ['https://www.googletagmanager.com', ...MAPS_HOSTS];
   let frameSrc = "'none'";
 
-  const needsCaptcha = isWardDetailPath(pathname) || /^\/candidate\/[^/]+$/.test(stripTrailingSlash(stripLocalePrefix(pathname)));
+  const isCandidate = /^\/candidate\/[^/]+$/.test(stripTrailingSlash(stripLocalePrefix(pathname)));
+  const needsCaptcha = isWardDetailPath(pathname) || isCandidate;
   if (needsCaptcha) {
     scriptSrcHosts.push('https://www.google.com', 'https://www.gstatic.com');
     frameSrc = 'https://www.google.com';
@@ -148,8 +149,10 @@ export function buildCsp(nonce: string, pathname: string): string {
   // screens frame the affidavit, so those screens may frame this site's own
   // pages and a stored file may be framed by them. Both stay same-origin: no
   // other site can frame anything here, and no page here can frame another
-  // site (the ward page's reCAPTCHA frame above is the one exception).
+  // site (reCAPTCHA frames on ward and candidate pages are the exception).
   if (isTranscribeReadingPath(pathname) || isCuratorAffidavitPath(pathname)) frameSrc = "'self'";
+  // Public report cards embed their stored PDF alongside reCAPTCHA.
+  if (isCandidate) frameSrc += " 'self'";
   const frameAncestors = isMediaPath(pathname) ? "'self'" : "'none'";
 
   const directives = [
