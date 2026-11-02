@@ -14,9 +14,10 @@ interface Props {
   lang: Lang;
   items: QueueListItem[];
   sort: QueueSort;
+  page?: number;
 }
 
-const { lang, items, sort } = Astro.props;
+const { lang, items, sort, page = 1 } = Astro.props;
 
 /** "{candidate} — {field}" for a flag on a candidate's field; the reference as stored for anything older or orphaned. */
 function targetLabel(item: QueueListItem): string {
@@ -58,7 +59,7 @@ function targetLabel(item: QueueListItem): string {
               <tr>
                 <td>{lang === 'kn' ? item.wardNameKn : item.wardNameEn}</td>
                 <td>{targetLabel(item)}</td>
-                <td>{item.submissionCount}</td>
+                <td>{item.submissionCount} · {t(lang, 'flag.review.spamCount', {count:item.spamCount ?? 0})}</td>
                 <td>{item.createdAt.toISOString()}</td>
                 <td>
                   <a href={`/curator/queue/${item.id}`}>{t(lang, 'curator.queue.viewLink')}</a>
@@ -69,6 +70,10 @@ function targetLabel(item: QueueListItem): string {
         </table>
       )
     }
+    <nav class="sort-nav" aria-label={t(lang,'flag.review.pages')}>
+      {page>1 && <a href={`?sort=${sort}&page=${page-1}`}>{t(lang,'flag.review.previous')}</a>}
+      {items.length===50 && <a href={`?sort=${sort}&page=${page+1}`}>{t(lang,'flag.review.next')}</a>}
+    </nav>
   </div>
 </CuratorLayout>
 

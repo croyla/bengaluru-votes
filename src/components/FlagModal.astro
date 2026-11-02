@@ -3,7 +3,7 @@
  * Flag misinformation modal shell (Task 32, IA §7.2, PRD §6.1/§6.3,
  * design-system.md §7.9) — rendered ONCE per page (from Base.astro, same
  * convention as `src/components/RegisterLoginModal.astro`), as a native
- * `<dialog>`. Purely markup/i18n — all behavior (auth gating + resume,
+ * `<dialog>`. Purely markup/i18n — all behavior (anonymous submission,
  * the field/claim picker, the fetch call, success/error states) lives in
  * the client island `src/islands/FlagModal.ts`, which finds this exact
  * markup via `[data-flag-modal]` and its `data-flag-*`/`data-msg-*` hooks.
@@ -26,16 +26,19 @@ interface Props {
 }
 
 const { lang } = Astro.props;
+const recaptchaSiteKey = process.env.RECAPTCHA_SITE_KEY ?? '';
+const isCandidate = /^\/(kn\/)?candidate\//.test(Astro.url.pathname);
 ---
 
-<dialog class="flag-modal" data-flag-modal aria-labelledby="flag-modal-title">
+<dialog class="flag-modal" data-flag-modal data-recaptcha-site-key={recaptchaSiteKey} aria-labelledby="flag-modal-title">
   <div class="flag-modal-inner">
     <Button variant="tertiary" iconOnly label={t(lang, 'flag.modal.close')} lang={lang} data-modal-close>
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
     </Button>
     <h2 id="flag-modal-title">{t(lang, 'flag.modal.title')}</h2>
 
-    <form data-flag-form novalidate>
+    <p>{t(lang, 'flag.modal.explanation')}</p>
+    <form data-flag-form>
       <div class="form-field">
         <p class="form-label" id="flag-target-label">{t(lang, 'flag.modal.targetLabel')}</p>
         <div data-flag-target-options role="radiogroup" aria-labelledby="flag-target-label"></div>
@@ -43,26 +46,26 @@ const { lang } = Astro.props;
 
       <div class="form-field">
         <label class="form-label" for="flag-detail">{t(lang, 'flag.modal.detailLabel')}</label>
-        <textarea id="flag-detail" class="form-input" name="detail" rows="3" required></textarea>
+        <textarea id="flag-detail" class="form-input" name="detail" rows="3" maxlength="2000" required></textarea>
       </div>
 
       <div class="form-field">
         <label class="form-label" for="flag-source">{t(lang, 'flag.modal.sourceLabel')}</label>
-        <input id="flag-source" class="form-input" name="sourceUrl" type="url" />
+        <input id="flag-source" class="form-input" name="sourceUrl" type="url" maxlength="2048" />
         <p class="form-error" data-flag-source-error hidden></p>
       </div>
 
       <div class="form-field">
         <label class="form-label" for="flag-suggested">{t(lang, 'flag.modal.suggestedLabel')}</label>
-        <input id="flag-suggested" class="form-input" name="suggestedValue" type="text" />
+        <input id="flag-suggested" class="form-input" name="suggestedValue" type="text" maxlength="1000" />
       </div>
 
-      <p class="form-error" data-flag-rate-limit-error hidden></p>
-      <p class="form-error" data-flag-generic-error hidden></p>
+      <p class="form-error" data-flag-rate-limit-error role="alert" hidden></p>
+      <p class="form-error" data-flag-generic-error role="alert" hidden></p>
 
-      <button type="submit" class="btn btn--primary" data-flag-submit>
+      <Button type="submit" variant="primary" lang={lang} data-flag-submit>
         {t(lang, 'flag.modal.submit')}
-      </button>
+      </Button>
     </form>
   </div>
 
@@ -70,7 +73,12 @@ const { lang } = Astro.props;
   <span hidden data-msg-source-invalid>{t(lang, 'flag.modal.sourceInvalid')}</span>
   <span hidden data-msg-generic-error>{t(lang, 'flag.modal.genericError')}</span>
   <span hidden data-msg-success>{t(lang, 'flag.modal.success')}</span>
+  <span hidden data-msg-verification>{t(lang, 'flag.modal.verification')}</span>
+  <span hidden data-msg-paused>{t(lang, 'flag.modal.paused')}</span>
+  <span hidden data-msg-already-reported>{t(lang, 'flag.modal.alreadyReported')}</span>
+  <span hidden data-msg-already-reviewed>{t(lang, 'flag.modal.alreadyReviewed')}</span>
 </dialog>
+{isCandidate && recaptchaSiteKey && <script is:inline src={`https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(recaptchaSiteKey)}`} async defer></script>}
 
 <style>
   .flag-modal {

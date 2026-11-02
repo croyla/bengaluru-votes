@@ -21,9 +21,10 @@ import type { ConsoleStats } from '../../../lib/admin';
 interface Props {
   lang: Lang;
   stats: ConsoleStats;
+  flagMetrics?: Awaited<ReturnType<typeof import('../../../lib/flag-abuse').loadFlagMetrics>>;
 }
 
-const { lang, stats } = Astro.props;
+const { lang, stats, flagMetrics } = Astro.props;
 ---
 
 <AdminLayout lang={lang} title={t(lang, 'admin.console.meta.title')} description={t(lang, 'admin.console.meta.description')}>
@@ -52,6 +53,16 @@ const { lang, stats } = Astro.props;
       </dl>
     </Card>
 
+    {flagMetrics && <Card>
+      <h2>{t(lang,'flag.metrics.heading')}</h2>
+      <p>{t(lang,flagMetrics.paused ? 'flag.metrics.paused' : 'flag.metrics.open')}</p>
+      {flagMetrics.spike && <p role="status">{t(lang,'flag.metrics.spike')}</p>}
+      <dl class="stat-list">
+        {(['accepted','duplicate','captcha_failed','captcha_error','rate_limited','spam'] as const).map(event => <div><dt>{t(lang,`flag.metrics.${event}`)}</dt><dd>{flagMetrics.counts[event] ?? 0}</dd></div>)}
+        <div><dt>{t(lang,'flag.metrics.pending')}</dt><dd>{flagMetrics.pending}</dd></div>
+        <div><dt>{t(lang,'flag.metrics.oldest')}</dt><dd>{flagMetrics.oldest ?? '—'}</dd></div>
+      </dl>
+    </Card>}
     <Card>
       <h2>{t(lang, 'admin.console.nav.heading')}</h2>
       <ul class="nav-list">

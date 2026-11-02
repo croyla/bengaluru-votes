@@ -26,6 +26,7 @@ const SECTIONS = ['reason', 'never', 'ward', 'matching', 'profile', 'notYours', 
     <ol>
       {STEPS.map((step) => <li>{t(lang, `curator.guide.flags.${step}`)}</li>)}
     </ol>
+    <p>{t(lang,'flag.review.guide')}</p>
 
     {
       SECTIONS.map((section) => (

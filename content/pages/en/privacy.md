@@ -28,7 +28,7 @@ We use **Google Analytics** to understand how visitors use this platform, alongs
 
 ## reCAPTCHA on anonymous submissions
 
-Anonymous ward issue voting is protected by **Google reCAPTCHA v3**, which sets its own cookies and sends usage data to Google to keep these no-account submissions safe from automated abuse.
+Anonymous ward issue voting and candidate-error reporting are protected by **Google reCAPTCHA v3**, which sets its own cookies and sends usage data to Google to keep these no-account submissions safe from automated abuse.
 
 ## Who else processes your data?
 
@@ -81,6 +81,14 @@ Our proposal — pending confirmation by legal counsel — is that citizen conta
 You choose exactly three issues and can cast one ballot from a browser in one ward. Results remain hidden until that browser votes, then appear as issue counts and the percentage of ward ballots that selected each issue. Because every ballot has three selections, those percentages can add up to 300%.
 
 The database stores the ballot choices beside a hash of the random browser receipt, not beside your name or account. We do not log the receipt or your selected issue IDs. Clearing browser storage can remove the receipt; this practical safeguard reduces repeat voting but cannot prove that one person has voted only once without requiring identity or registration.
+
+## Candidate-error reports
+
+You can report a candidate-field error without an account, email address or phone number. We store your explanation and optional correction/source link for private curator review. Please avoid including personal contact information. Reports do not automatically change published data. If you are signed in, your account history shows the outcome; anonymous submissions receive confirmation but have no outcome-history service.
+
+A signed random browser cookie lasts 30 days. We store a keyed hash, not the cookie value, with reports to reduce duplicates and abuse. Browser identifiers expire after 30 days. Network limits use a keyed hash of your IP address; this network metadata expires after 48 hours. Closed-report duplicate fingerprints expire after seven days. Expired metadata is removed by the next daily cleanup. Anonymous reports are not later attached to an account when you sign in. Report content follows the existing report/account retention policy, whose final period remains under review.
+
+Aggregate abuse counters contain no report text or reporter identifiers and are retained for 30 days. These limits do not govern ordinary server access logs, which may contain IP addresses. Their retention must be confirmed operationally before this draft policy is finalized.
 
 ## Language of this policy
 

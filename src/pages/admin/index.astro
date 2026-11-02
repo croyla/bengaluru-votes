@@ -9,14 +9,15 @@
  * src/middleware.ts already 403s any non-admin session and redirects an
  * anonymous request to /login before this ever runs.
  */
+import { loadFlagMetrics } from '../../lib/flag-abuse';
 import Console from '../../features/pages/admin/Console.astro';
 import { loadConsoleStats } from '../../lib/admin';
 import { loadCuratorLang } from '../../lib/curator';
 
 const session = Astro.locals.session!;
-const [stats, lang] = await Promise.all([loadConsoleStats(), loadCuratorLang(session.userId)]);
+const [stats, lang, flagMetrics] = await Promise.all([loadConsoleStats(), loadCuratorLang(session.userId), loadFlagMetrics()]);
 
 Astro.response.headers.set('cache-control', 'no-store');
 ---
 
-<Console lang={lang} stats={stats} />
+<Console lang={lang} stats={stats} flagMetrics={flagMetrics} />

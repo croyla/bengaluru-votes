@@ -8,15 +8,16 @@ import Queue from '../../../features/pages/curator/Queue.astro';
 import { loadQueueList, loadCuratorLang, type QueueSort } from '../../../lib/curator';
 
 const session = Astro.locals.session!;
+const page = Math.max(1,Math.min(10000,Math.trunc(Number(Astro.url.searchParams.get('page')))||1));
 const sortParam = Astro.url.searchParams.get('sort');
 const sort: QueueSort = sortParam === 'ward' ? 'ward' : 'recent';
 
 const [items, lang] = await Promise.all([
-  loadQueueList(sort),
+  loadQueueList(sort,page),
   loadCuratorLang(session.userId),
 ]);
 
 Astro.response.headers.set('cache-control', 'no-store');
 ---
 
-<Queue lang={lang} items={items} sort={sort} />
+<Queue lang={lang} items={items} sort={sort} page={page} />

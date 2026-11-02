@@ -293,10 +293,10 @@ describe('/curator, /curator/queue, /curator/queue/{id} (Task 34) — IA §5.1/�
       const html = normalize(await queueRes.text());
 
       // Each row names the candidate and the flagged field, under the candidate's ward.
-      expect(html).toContain(`<td>${WARD_B.nameEn}</td><td>${CASES_LABEL}</td><td>1</td>`);
+      expect(html).toContain(`<td>${WARD_B.nameEn}</td><td>${CASES_LABEL}</td><td>1 · 0 spam</td>`);
 
       // Including the dedupe count.
-      expect(html).toContain(`<td>${WARD_A.nameEn}</td><td>${CASES_LABEL}</td><td>2</td>`);
+      expect(html).toContain(`<td>${WARD_A.nameEn}</td><td>${CASES_LABEL}</td><td>2 · 0 spam</td>`);
 
       // A row older than the fixed field set has no label: its reference is shown as stored.
       expect(html).toContain(`<td>${itemCsrf.targetRef}</td>`);

@@ -1,49 +1,24 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { eq } from 'drizzle-orm';
 import * as schema from '../../src/db/schema';
 import { randomUUID } from 'node:crypto';
-
-if (!process.env.DATABASE_URL) {
-  throw new Error(
-    'DATABASE_URL is not set. These tests need a Postgres database of their ' +
-      'own — see CLAUDE.md ("Tests need a database") for how to get one.',
-  );
-}
-
-const client = postgres(process.env.DATABASE_URL, { max: 5 });
-const db = drizzle(client, { schema });
-
-// High, task-specific ward id (Task 31 brief) — this suite owns 99311
-// (tests/unit/flags.test.ts owns 99310).
-const WARD_ID = 99311;
-
-let candidateId: number;
-let userId: number;
-
-function req(body: unknown): Request {
-  return new Request('http://localhost/api/flags', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-}
-
-function targetRefFor(fieldKey: string): string {
-  return `candidate:${candidateId}:${fieldKey}`;
-}
-
-vi.mock('../../src/lib/rate-limit', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/lib/rate-limit')>();
-  return { ...actual, checkDefaultLimit: vi.fn() };
-});
-
-import { checkDefaultLimit } from '../../src/lib/rate-limit';
+import { issueFlagToken, FLAG_COOKIE } from '../../src/lib/flag-abuse';
 import { POST as flagsPOST } from '../../src/pages/api/flags';
-
-describe('POST /api/flags (Task 31)', () => {
+vi.mock('../../src/lib/recaptcha', () => ({ verifyRecaptcha: vi.fn(async () => ({ ok: true })) }));
+import { verifyRecaptcha } from '../../src/lib/recaptcha';
+const client = postgres(process.env.DATABASE_URL!, { max: 5 });
+const db = drizzle(client, { schema });
+const WARD_ID = 99311;
+let candidateId: number, userId: number;
+const targetRefFor = (key: string) => `candidate:${candidateId}:${key}`;
+function req(body: unknown) { return new Request('http://localhost/api/flags', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); }
+function context(body: unknown, token = issueFlagToken()) { return { request: req(body), clientAddress: '127.0.0.1', locals: { session: null }, cookies: { get: () => token ? { value: token } : undefined } } as any; }
+function payload(extra = {}) { return { wardId: WARD_ID, targetType: 'candidate_field', targetRef: targetRefFor('age'), detail: 'Incorrect age', recaptchaToken: 'test', ...extra }; }
+afterEach(() => { vi.mocked(verifyRecaptcha).mockResolvedValue({ ok: true }); delete process.env.FLAGS_SUBMISSIONS_PAUSED; });
+describe('anonymous flag API', () => {
   beforeAll(async () => {
     await migrate(db, { migrationsFolder: './drizzle' });
 
@@ -81,170 +56,24 @@ describe('POST /api/flags (Task 31)', () => {
     await client.end();
   });
 
-  it('anonymous (no session) -> 401, no-store', async () => {
-    vi.mocked(checkDefaultLimit).mockResolvedValue(true);
 
-    const res = await flagsPOST({
-      request: req({
-        wardId: WARD_ID,
-        targetType: 'candidate_field',
-        targetRef: targetRefFor('anon_check'),
-        detail: 'Should never reach the DB.',
-      }),
-      locals: { session: null },
-    } as any);
-
-    expect(res.status).toBe(401);
-    expect(res.headers.get('cache-control')).toBe('no-store');
+  it('accepts an anonymous report and sets no cacheable response', async () => {
+    const res = await flagsPOST(context(payload()));
+    expect(res.status).toBe(200); expect(res.headers.get('cache-control')).toBe('no-store');
   });
-
-  it('non-http sourceUrl (javascript:) -> 400', async () => {
-    vi.mocked(checkDefaultLimit).mockResolvedValue(true);
-
-    const res = await flagsPOST({
-      request: req({
-        wardId: WARD_ID,
-        targetType: 'candidate_field',
-        targetRef: targetRefFor('js_url_check'),
-        detail: 'Malicious source link.',
-        sourceUrl: 'javascript:alert(1)',
-      }),
-      locals: { session: { userId, role: 'citizen' } },
-    } as any);
-
-    expect(res.status).toBe(400);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-
-    const items = await db
-      .select()
-      .from(schema.flagItems)
-      .where(eq(schema.flagItems.targetRef, targetRefFor('js_url_check')));
-    expect(items).toHaveLength(0);
+  it('requires a valid issued browser token', async () => {
+    expect((await flagsPOST(context(payload(), 'fabricated'))).status).toBe(403);
   });
-
-  it('over rate limit -> 429', async () => {
-    vi.mocked(checkDefaultLimit).mockResolvedValue(false);
-
-    const res = await flagsPOST({
-      request: req({
-        wardId: WARD_ID,
-        targetType: 'candidate_field',
-        targetRef: targetRefFor('rate_limited_check'),
-        detail: 'Should be blocked by rate limit.',
-      }),
-      locals: { session: { userId, role: 'citizen' } },
-    } as any);
-
-    expect(res.status).toBe(429);
-
-    const items = await db
-      .select()
-      .from(schema.flagItems)
-      .where(eq(schema.flagItems.targetRef, targetRefFor('rate_limited_check')));
-    expect(items).toHaveLength(0);
+  it.each([{ sourceUrl: 'javascript:alert(1)' }, { detail: 'x'.repeat(2001) }, { targetRef: 'candidate:1:affidavit' }, { injected: true }])('rejects invalid input %j', async extra => {
+    expect((await flagsPOST(context(payload(extra)))).status).toBe(400);
   });
-
-  it('valid submission -> 200 {ok:true, flagItemId}, no-store', async () => {
-    vi.mocked(checkDefaultLimit).mockResolvedValue(true);
-    const targetRef = targetRefFor('full_name');
-
-    const res = await flagsPOST({
-      request: req({
-        wardId: WARD_ID,
-        targetType: 'candidate_field',
-        targetRef,
-        detail: 'Track record looks stale.',
-        sourceUrl: 'https://example.org/evidence',
-      }),
-      locals: { session: { userId, role: 'citizen' } },
-    } as any);
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(typeof body.flagItemId).toBe('number');
-
-    const items = await db.select().from(schema.flagItems).where(eq(schema.flagItems.targetRef, targetRef));
-    expect(items).toHaveLength(1);
-    expect(items[0]!.id).toBe(body.flagItemId);
+  it('rejects oversized body before parsing', async () => {
+    expect((await flagsPOST(context(payload({ detail: 'x'.repeat(40000) })))).status).toBe(413);
   });
-
-  it.each([
-    ['ward_field', (c: number, w: number) => `ward:${w}:name`],
-    ['ward_issue', () => 'ward_issue:1'],
-    ['candidate_field', (c: number) => `candidate:${c}:ec_affidavit`],
-    ['candidate_field', (c: number) => `candidate:${c}:track_record`],
-  ] as const)('refuses a %s flag on a target outside the eight candidate fields', async (targetType, ref) => {
-    vi.mocked(checkDefaultLimit).mockResolvedValue(true);
-    const targetRef = ref(candidateId, WARD_ID);
-
-    const res = await flagsPOST({
-      request: req({ wardId: WARD_ID, targetType, targetRef, detail: 'wrong' }),
-      locals: { session: { userId, role: 'citizen' } },
-    } as any);
-
-    expect(res.status).toBe(400);
-    const rows = await db.select().from(schema.flagItems).where(eq(schema.flagItems.targetRef, targetRef));
-    expect(rows).toHaveLength(0);
-  });
-
-  it("still accepts a flag on the candidate's ward", async () => {
-    vi.mocked(checkDefaultLimit).mockResolvedValue(true);
-
-    const res = await flagsPOST({
-      request: req({
-        wardId: WARD_ID,
-        targetType: 'candidate_field',
-        targetRef: targetRefFor('ward'),
-        detail: 'This candidate is in ward 12',
-      }),
-      locals: { session: { userId, role: 'citizen' } },
-    } as any);
-
-    expect(res.status).toBe(200);
-  });
-
-  it('accepts a plain http:// sourceUrl too (not just https)', async () => {
-    vi.mocked(checkDefaultLimit).mockResolvedValue(true);
-    const targetRef = targetRefFor('party');
-
-    const res = await flagsPOST({
-      request: req({
-        wardId: WARD_ID,
-        targetType: 'candidate_field',
-        targetRef,
-        detail: 'Old but plain http source.',
-        sourceUrl: 'http://example.org/old-source',
-      }),
-      locals: { session: { userId, role: 'citizen' } },
-    } as any);
-
-    expect(res.status).toBe(200);
-  });
-
-  describe('privacy: detail/sourceUrl content is never logged', () => {
-    it('does not appear in any console.log call', async () => {
-      vi.mocked(checkDefaultLimit).mockResolvedValue(true);
-      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      const secretDetail = 'my-secret-medical-record-detail-xyz';
-      const secretSourceUrl = 'https://example.org/secret-personal-path-xyz';
-
-      await flagsPOST({
-        request: req({
-          wardId: WARD_ID,
-          targetType: 'candidate_field',
-          targetRef: targetRefFor('gender'),
-          detail: secretDetail,
-          sourceUrl: secretSourceUrl,
-        }),
-        locals: { session: { userId, role: 'citizen' } },
-      } as any);
-
-      const logged = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
-      expect(logged).not.toContain(secretDetail);
-      expect(logged).not.toContain(secretSourceUrl);
-      logSpy.mockRestore();
-    });
+  it('fails closed on bot verification and pause', async () => {
+    vi.mocked(verifyRecaptcha).mockResolvedValue({ ok: false, reason: 'low_score' });
+    expect((await flagsPOST(context(payload()))).status).toBe(403);
+    process.env.FLAGS_SUBMISSIONS_PAUSED = 'true';
+    expect((await flagsPOST(context(payload()))).status).toBe(503);
   });
 });

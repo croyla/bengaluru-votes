@@ -325,7 +325,7 @@ Curators work the citizen flag queue and the matching list, on demo data, before
 
 **What ships**
 
-- **The citizen flag queue**, city-wide: the flagged field, the citizen's comment and the published value, beside the affidavit. The fix is made in structured inputs, the same ones a transcriber fills (a ward flag is fixed by moving the candidate to another ward), behind a required confirmation tick; or the curator rejects the flag with a reason. Either outcome reaches the submitter at `/account/submissions`. Resolution publishes immediately (tracker 112). Flags are accepted on the eight profile fields only.
+- **The citizen flag queue**, city-wide: the flagged field, the citizen's comment and the published value, beside the affidavit. The fix is made in structured inputs, the same ones a transcriber fills (a ward flag is fixed by moving the candidate to another ward), behind a required confirmation tick; or the curator rejects the flag with a reason. Signed-in submitters see the outcome at `/account/submissions`; anonymous submitters receive submission confirmation only. Resolution publishes immediately (tracker 112). Flags are accepted on the eight profile fields only.
 - **The matching list** at `/curator/matching`: affidavits the AI could not place in a ward, possible duplicates, and affidavits a transcriber sent back. The curator reads the affidavit, picks the ward and confirms the name and party. Bulk upload, retrying and discarding stay with the admin.
 - **Search** on the curator's home page, by candidate name or ward, and a list of each ward's candidates at `/curator/ward/{id}`.
 - **The candidate editor**, already built at `/curator/candidate/{id}`, now on the same structured inputs beside the affidavit. It stays as a tool — a curator can fix an unflagged value they come across — but routinely checking unflagged fields is not part of the role.
@@ -651,3 +651,5 @@ Several things this plan depends on have no home on disk right now and are not r
 6. **Two questions are worth more than the rest of the plan combined:** when is N (tracker 71), and can affidavits be obtained in bulk (tracker 121). Both are answerable by asking. Both are unassigned.
 
 Related: `docs/election-timelines.md` (what the calendar allows), `docs/ksec-data-risk.md` (whether the candidate data exists at all), `docs/architecture.md` (the technical design), `docs/project-dependencies.md` (everything outside the codebase), `docs/messages.md` (the send copy), `docs/design-system.md`, `docs/gcp.md`.
+
+Anonymous reporting change (2026-11-02): candidate-field reports no longer depend on M10 registration. M7 includes per-submission spam moderation, grouped/paginated reports and previous resolutions; M6 shows aggregate abuse counters. Admission uses CAPTCHA, atomic browser/account/network limits and duplicate suppression. The eight-field scope and curator-only publication remain.

@@ -62,6 +62,12 @@ const BADGE_VARIANT: Record<QueueItemDetail['status'], BadgeVariant> = {
 const WEB_ADDRESS = /^https?:\/\//i;
 
 const { candidate, fix } = item;
+// Group identical submissions within this bounded page, retaining individual IDs.
+const groupedSubmissions = new Map<string, typeof item.submissions>();
+for (const row of item.submissions) {
+  const key = JSON.stringify([row.detail.trim().replace(/\s+/gu,' '),row.suggestedValue,row.sourceUrl,row.isSpam]);
+  groupedSubmissions.set(key,[...(groupedSubmissions.get(key) ?? []),row]);
+}
 const isPending = item.status === 'pending';
 const confirmPath = `/ward/${item.wardId}`;
 const editorPath = candidate ? `/curator/candidate/${candidate.id}` : null;
@@ -118,9 +124,18 @@ const publishedText = field
 
     <Card>
       <h2>{t(lang, 'curator.queueItem.submissions.heading')}</h2>
+      {isPending && <form id="flag-spam-form" method="post">
+        <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+        <input type="hidden" name="formAction" value="spam" />
+        <div class="form-field"><label for="spam-reason" class="form-label">{t(lang,'flag.review.spamReason')}</label>
+        <input id="spam-reason" class="form-input" name="reason" required maxlength="1000" /></div>
+        <Button type="submit" variant="destructive" lang={lang}>{t(lang,'flag.review.markSpam')}</Button>
+      </form>}
       <ul class="submissions-list">
-        {item.submissions.map((submission) => (
+        {[...groupedSubmissions.values()].map((group) => { const submission=group[0]!; return (
           <li class="submission-card">
+            <p class="meta">{t(lang,'flag.review.groupCount',{count:group.length})}</p>
+            {group.map(row => <p class="meta">{row.isSpam ? t(lang,'flag.review.spam') : isPending ? <label><input type="checkbox" name="submissionId" value={row.id} form="flag-spam-form" /> {t(lang,'flag.review.selectReport',{id:row.id})}</label> : null}</p>)}
             <p class="detail">{submission.detail}</p>
             {submission.suggestedValue && (
               <p class="meta">
@@ -141,9 +156,17 @@ const publishedText = field
             )}
             <p class="meta">{submission.createdAt.toISOString()}</p>
           </li>
-        ))}
+        ); })}
       </ul>
+      <nav class="report-pages" aria-label={t(lang,'flag.review.pages')}>
+        {item.page>1 && <a href={`?page=${item.page-1}`}>{t(lang,'flag.review.previous')}</a>}
+        {item.hasMore && <a href={`?page=${item.page+1}`}>{t(lang,'flag.review.next')}</a>}
+      </nav>
     </Card>
+    {(item.priorResolutions ?? []).length>0 && <Card>
+      <h2>{t(lang,'flag.review.previousResolutions')}</h2>
+      <ul>{item.priorResolutions.map(previous => <li><a href={`/curator/queue/${previous.id}`}>{t(lang,previous.status==='accepted' ? 'common.badge.flagAccepted' : 'common.badge.flagRejected')} · {previous.resolvedAt?.toISOString().slice(0,10)}</a></li>)}</ul>
+    </Card>}
 
     {
       field && (
@@ -243,6 +266,8 @@ const publishedText = field
 </CuratorLayout>
 
 <style>
+  #flag-spam-form { display:grid; gap:var(--space-3); margin-bottom:var(--space-4); }
+  .report-pages { display:flex; gap:var(--space-4); margin-top:var(--space-4); }
   /* The page's column, its width and its scrolling belong to CuratorSplit;
      these are the pieces this page puts inside it. */
   h1 {

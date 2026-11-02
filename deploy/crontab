@@ -44,3 +44,6 @@
 # check and logs an error here every night, which is the reminder. Do not
 # comment this out to quiet the log.
 0 2 * * * /app/scripts/backup.sh >> /var/log/gba-jobs/backup.log 2>&1
+
+# Always active: expires short-lived report abuse metadata, not report content.
+15 6 * * * cd /app && tsx jobs/flag-cleanup.ts >> /var/log/gba-jobs/flag-cleanup.log 2>&1

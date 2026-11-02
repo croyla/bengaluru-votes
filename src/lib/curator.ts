@@ -18,7 +18,7 @@
  * writes) rather than the URL — there is no URL to derive it from. See
  * `loadCuratorLang` below.
  */
-import { desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { db } from '../db/client';
 import { candidateIdentitySelection } from './candidate-identity';
 import {
@@ -121,11 +121,12 @@ export interface QueueListItem {
   /** The flagged candidate's name, or null when the row names no candidate that still exists. */
   candidateNameEn: string | null;
   submissionCount: number;
+  spamCount: number;
   createdAt: Date;
 }
 
 /** Every PENDING flag_item, city-wide. */
-export async function loadQueueList(sort: QueueSort = 'recent'): Promise<QueueListItem[]> {
+export async function loadQueueList(sort: QueueSort = 'recent', page = 1): Promise<QueueListItem[]> {
   const whereClause = eq(flagItems.status, 'pending');
 
   const rows = await db
@@ -137,14 +138,15 @@ export async function loadQueueList(sort: QueueSort = 'recent'): Promise<QueueLi
       targetType: flagItems.targetType,
       targetRef: flagItems.targetRef,
       createdAt: flagItems.createdAt,
-      submissionCount: sql<number>`count(${flagSubmissions.id})::int`,
+      submissionCount: sql<number>`count(${flagSubmissions.id}) filter(where not ${flagSubmissions.isSpam})::int`,
+      spamCount: sql<number>`count(${flagSubmissions.id}) filter(where ${flagSubmissions.isSpam})::int`,
     })
     .from(flagItems)
     .innerJoin(wards, eq(wards.id, flagItems.wardId))
     .leftJoin(flagSubmissions, eq(flagSubmissions.flagItemId, flagItems.id))
     .where(whereClause)
     .groupBy(flagItems.id, wards.id)
-    .orderBy(sort === 'ward' ? wards.nameEn : desc(flagItems.createdAt));
+    .orderBy(sort === 'ward' ? wards.nameEn : desc(flagItems.createdAt),desc(flagItems.id)).limit(50).offset((Math.max(1,Math.min(10000,Math.trunc(page)||1))-1)*50);
 
   // The candidate is named only inside `target_ref`, so the names come from a second query.
   const targets = rows.map((row) => (row.targetType === 'candidate_field' ? parseCandidateFieldTargetRef(row.targetRef) : null));
@@ -171,7 +173,8 @@ export async function loadQueueList(sort: QueueSort = 'recent'): Promise<QueueLi
 
 export interface FlagSubmissionRow {
   id: number;
-  userId: number;
+  userId: number | null;
+  isSpam: boolean;
   detail: string;
   suggestedValue: string | null;
   sourceUrl: string | null;
@@ -189,6 +192,9 @@ export interface QueueItemDetail {
   resolutionReason: string | null;
   createdAt: Date;
   submissions: FlagSubmissionRow[];
+  page: number;
+  hasMore: boolean;
+  priorResolutions: { id: number; status: FlagStatus; reason: string | null; resolvedAt: Date | null }[];
   /** The flagged candidate; null for a row that is not about a candidate's field, or whose candidate no longer exists. */
   candidate: FixCandidate | null;
   /** The flagged field's key as the row carries it; null for a row that is not about a candidate's field. */
@@ -202,7 +208,7 @@ export interface QueueItemDetail {
 }
 
 /** `null` when no such flag_items row exists (the route twin turns that into a 404). */
-export async function loadQueueItem(id: number): Promise<QueueItemDetail | null> {
+export async function loadQueueItem(id: number, page = 1): Promise<QueueItemDetail | null> {
   const [item] = await db
     .select({
       id: flagItems.id,
@@ -220,10 +226,12 @@ export async function loadQueueItem(id: number): Promise<QueueItemDetail | null>
     .where(eq(flagItems.id, id));
   if (!item) return null;
 
+  page = Math.max(1,Math.min(10000,Math.trunc(page)||1));
   const submissions = await db
     .select({
       id: flagSubmissions.id,
       userId: flagSubmissions.userId,
+      isSpam: flagSubmissions.isSpam,
       detail: flagSubmissions.detail,
       suggestedValue: flagSubmissions.suggestedValue,
       sourceUrl: flagSubmissions.sourceUrl,
@@ -231,7 +239,7 @@ export async function loadQueueItem(id: number): Promise<QueueItemDetail | null>
     })
     .from(flagSubmissions)
     .where(eq(flagSubmissions.flagItemId, id))
-    .orderBy(flagSubmissions.createdAt);
+    .orderBy(flagSubmissions.createdAt,flagSubmissions.id).limit(21).offset((page-1)*20);
 
   let candidate: FixCandidate | null = null;
   let fieldKey: string | null = null;
@@ -248,7 +256,9 @@ export async function loadQueueItem(id: number): Promise<QueueItemDetail | null>
     }
   }
 
-  return { ...item, submissions, candidate, fieldKey, fix };
+  const priorResolutions = await db.select({ id:flagItems.id,status:flagItems.status,reason:flagItems.resolutionReason,resolvedAt:flagItems.resolvedAt }).from(flagItems)
+    .where(and(eq(flagItems.targetRef,item.targetRef),sql`${flagItems.status}<>'pending'`,sql`${flagItems.id}<>${id}`)).orderBy(desc(flagItems.resolvedAt)).limit(5);
+  return { ...item, submissions:submissions.slice(0,20), page,hasMore:submissions.length>20,priorResolutions,candidate,fieldKey,fix };
 }
 
 // ---------------------------------------------------------------------------

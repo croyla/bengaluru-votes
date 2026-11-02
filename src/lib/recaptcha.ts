@@ -29,6 +29,8 @@ export interface RecaptchaVerifyResult {
   success: boolean;
   score: number;
   action?: string;
+  hostname?: string;
+  errorCodes?: string[];
 }
 
 /** Injectable transport — swapped out entirely in tests so no real network call to Google is ever made. */
@@ -43,6 +45,7 @@ export interface VerifyRecaptchaOptions {
   verifier?: RecaptchaVerifier;
   /** Require the token to have been minted for this v3 action. */
   expectedAction?: string;
+  expectedHostname?: string;
 }
 
 export interface VerifyRecaptchaResult {
@@ -57,12 +60,15 @@ const DEFAULT_MIN_SCORE = 0.5;
 /** The real verifier: POSTs to Google's siteverify endpoint. Never exercised by tests — always swapped via opts.verifier. */
 async function callSiteverify(token: string, secret: string): Promise<RecaptchaVerifyResult> {
   const body = new URLSearchParams({ secret, response: token });
-  const res = await fetch(SITEVERIFY_ENDPOINT, { method: 'POST', body });
-  const data = (await res.json()) as { success?: boolean; score?: number; action?: string };
+  const res = await fetch(SITEVERIFY_ENDPOINT, { method: 'POST', body, signal: AbortSignal.timeout(5000) });
+  if (!res.ok) throw new Error('captcha_http_error');
+  const data = (await res.json()) as { success?: boolean; score?: number; action?: string; hostname?: string; 'error-codes'?: string[] };
   return {
     success: data.success === true,
     score: typeof data.score === 'number' ? data.score : 0,
     action: data.action,
+    hostname: data.hostname,
+    errorCodes: data['error-codes'],
   };
 }
 
@@ -88,12 +94,15 @@ export async function verifyRecaptcha(token: string, opts: VerifyRecaptchaOption
   }
 
   const verifier = opts.verifier ?? callSiteverify;
-  const result = await verifier(token, secret);
+  let result: RecaptchaVerifyResult;
+  try { result = await verifier(token, secret); } catch { return { ok: false, reason: 'unavailable' }; }
+  if (result.errorCodes?.length) return { ok: false, reason: 'provider_error' };
+  if (opts.expectedHostname && result.hostname !== opts.expectedHostname) return { ok: false, reason: 'wrong_hostname' };
 
   if (!result.success) {
     return { ok: false, score: result.score, reason: 'verification_failed' };
   }
-  if (result.score < minScore) {
+  if (!Number.isFinite(result.score) || result.score < minScore || result.score > 1) {
     return { ok: false, score: result.score, reason: 'low_score' };
   }
   if (opts.expectedAction && result.action !== opts.expectedAction) {

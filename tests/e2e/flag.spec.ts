@@ -4,7 +4,7 @@
  *
  * Two actors, two browser contexts (separate cookie jars — they must never
  * share a session):
- *   1. An anonymous citizen (registers via OTP mid-flow) flags the seeded
+ *   1. An anonymous citizen flags the seeded
  *      candidate's `age` field, suggesting a correction.
  *   2. The seeded curator (already-registered contact, plain OTP login on
  *      the /login page)
@@ -29,8 +29,7 @@
  */
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { and, desc, eq } from 'drizzle-orm';
-import { seedFixtures, freshEmail } from './support/fixtures';
-import { registerNewUser } from './support/auth';
+import { seedFixtures } from './support/fixtures';
 import { readLatestOtpCode } from './support/otp-sink';
 import { db } from './support/db';
 import { candidateFields, flagItems } from '../../src/db/schema';
@@ -87,7 +86,7 @@ async function findPendingFlagItemId(): Promise<number> {
 }
 
 test('citizen flags a candidate field, curator accepts + publishes, correction goes live', async ({ browser }) => {
-  // Two full OTP round-trips (citizen registration + curator login) plus
+  // Curator OTP login plus
   // three separate browser contexts/page loads — comfortably over the
   // default 30s budget on a slower run.
   test.setTimeout(60_000);
@@ -105,10 +104,7 @@ test('citizen flags a candidate field, curator accepts + publishes, correction g
 
   await citizenPage.locator('[data-flag-action]').click();
 
-  // FlagModal.ts's /api/me check found the visitor anonymous and opened
-  // Register/Login first (core concept 2: gated at submit, resumed in place).
-  await registerNewUser(citizenPage, { destination: freshEmail('flagger'), wardId });
-
+  // Reporting is anonymous: no registration/OTP step.
   const flagDialog = citizenPage.locator('[data-flag-modal]');
   await expect(flagDialog).toBeVisible();
 

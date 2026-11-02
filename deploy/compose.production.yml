@@ -165,6 +165,7 @@ services:
       # SITE_ORIGIN above. It lives here rather than in the box's .env file
       # so the value is versioned with the stack that depends on it.
       APP_ENV: production
+      FLAGS_TRUST_PROXY: 'true'
     networks:
       - front
       - back_prod

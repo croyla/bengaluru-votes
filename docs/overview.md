@@ -80,13 +80,13 @@ Two notes that matter more than they look.
 
 | Role | Who they are | Primary job |
 |---|---|---|
-| **Anonymous citizen** | Any visitor, no account | Find & read information; cast an anonymous issue ballot; sign in to submit a flag |
+| **Anonymous citizen** | Any visitor, no account | Find & read information; cast an anonymous issue ballot; report candidate-field errors without an account |
 | **Registered citizen** | Signs up with email/WhatsApp + ward + language | Get updates; flag candidate misinformation; vote on ward issues |
 | **Transcriber** | Hired readers, Kannada-literate; no ward of their own | Check the AI-extracted fields on one candidate affidavit at a time |
 | **Data curator** | Trusted, vetted individuals, city-wide | Work the citizen flag queue: fix the data or reject the flag |
 | **Admin** | Small internal team | Manage roles, access, users, and oversight |
 
-**One guiding principle:** the two citizen contributions — flagging an error and voting on issues — are **visible to everyone but require registration at the moment of submitting**. Anonymous users see the buttons; tapping one opens a quick sign-up popup, then the action continues.
+**One guiding principle:** the two citizen contributions — flagging an error and voting on issues — are **available without registration**. Flagging opens a report modal; issue voting stays inline. CAPTCHA, rate limits and duplicate suppression protect reporting, and curators verify evidence before changing data.
 
 ---
 
@@ -125,7 +125,7 @@ Two notes that matter more than they look.
 *A trusted, vetted individual responsible for data accuracy. Because curators are trusted, their edits go live immediately — no second approval.*
 
 - Small team of 2, on a rota through election day, **working city-wide**, paid **₹5,000 each** for the cycle. With two people and 369 wards, assigning wards to curators would be a label rather than a division of work, so there is no ward scope: any curator can act anywhere.
-- Review the queue of citizen flags, and accept them (making the correction) or reject them (with a reason the submitter can see).
+- Review the queue of citizen flags, and accept them (making the correction) or reject them (with a reason signed-in submitters can see in account history).
 - **The job is the flag queue and nothing else** (decided 2026-10-13, following `docs/candidate-data.md`). Curators do not routinely read affidavits, approve transcriber work, or receive unflagged cases.
 - **The candidate editor stays available as a tool.** A curator who comes across an obviously wrong value can open the candidate and fix it without waiting for a flag, but looking for such errors is not part of the role and no coverage is planned around it.
 - **Out of scope:** no monitoring of transcribers. The transcriber performance view that was planned for curators is dropped.
@@ -146,9 +146,9 @@ Two notes that matter more than they look.
 
 ## 6. How citizen contributions become live data
 
-The correction loop connects citizens and curators. Both flagging and voting happen through **popups** that overlay the current page, so citizens never lose their place.
+The correction loop connects citizens and curators. Flagging opens a modal and issue voting stays inline; neither requires an account or takes citizens away from the current page.
 
-1. **Notice an error / want to vote** — anyone can tap Flag or Vote. Voting opens directly without an account. Flagging prompts anonymous users to sign in, then resumes in place.
+1. **Notice an error / want to vote** — anyone can tap Flag or Vote. Voting opens directly without an account. Flagging opens directly without an account.
 2. **Submit** — a flag joins the single city-wide curator queue; an exactly-three issue ballot is recorded for the chosen ward, once per browser receipt.
 3. **Review** — the curator sees the flagged field along with the comment, and either makes the fix or rejects the flag with a reason.
 4. **Record** — the change is published immediately, and the outcome appears on the submitter's own submissions page. A citizen who reports an error finds out what came of it.
@@ -171,10 +171,10 @@ The correction loop connects citizens and curators. Both flagging and voting hap
 | Curator publish gate | Curators are trusted; edits go live immediately, no second approval. |
 | Authentication | **One OTP mechanism for every role.** Citizens by email or WhatsApp; staff — admins, curators, transcribers — by **email only**. No passwords, no 2FA, no sign-in links. The first admin is bootstrapped with `npm run seed:admin`. **Temporarily (from 2026-10-13, until email sending works) sign-in is by a shared master password instead, and citizen registration is paused.** |
 | Registration & flagging | Both are popups — no redirection. |
-| Anonymous contribution | Issue voting needs no account; flagging still prompts for registration. |
+| Anonymous contribution | Issue voting and candidate-field reporting both need no account. |
 | Issue-vote visibility | Counts and percentages are returned only after that browser has voted in the ward. |
 | Issue-vote scope | One immutable, exactly-three ballot in one ward per browser receipt. |
-| Flagging scope | Registered citizens can flag across any ward. |
+| Flagging scope | Any visitor can report candidate-field errors across any ward. |
 | Issue list ownership | **Derived centrally**, in one editorial pass, from Sahaaya / JAM output and Open City complaints — not defined per ward by a curator. It is already a launch dependency; it needs a named owner. |
 | Report card content | **Affidavit-sourced fields and the affidavit itself.** Curator-compiled press coverage is deferred — it has no owner at this headcount. |
 | Curator scope | **City-wide.** A team of two across 369 wards is not a scoping problem, and per-ward assignment would be a label rather than a division of work. **Vetting is now the only net** — the audit log that used to share that job was removed on 2026-08-15, so a curator's scope is their unreviewed and unrecorded blast radius. |
@@ -187,7 +187,7 @@ The correction loop connects citizens and curators. Both flagging and voting hap
 | Launch phasing | **Fourteen milestones**, replacing a nine-milestone plan on 2026-08-15 (`docs/milestones.md`), with the messaging one split into an email half and a WhatsApp half. **Two launches, not one:** a soft launch on the ward finder and voting guidance at the announcement, and a hard launch on candidates and booths once real data exists. |
 | Staff sessions | **Intended: 24 hours, then sign in again. Not built yet: every role is on the 1-hour sliding session today.** Long enough that nobody re-authenticates mid-shift, short enough that a borrowed laptop or a stale browser stops being a way in by the next day. |
 | Staff access | Staff sign in by email OTP, so the data operation **depends on SendGrid** — and on nothing else. It does not depend on Meta verification, the WhatsApp number, or template approval, which is where the messaging milestone's forty days actually go. |
-| Registered users | Behind the soft launch, so **registration cannot build a list before the election is announced**. Accounts, updates and flagging sit here; issue voting is available without an account. |
+| Registered users | Behind the soft launch, so **registration cannot build a list before the election is announced**. Accounts and updates sit here; issue voting and candidate-field reporting are available without an account. |
 | Messaging | **Abandonable.** WhatsApp and email sending is 40 days of vendor approvals nobody can compress. If it does not land, registered-user support is dropped and the platform ships anonymous-only. |
 | Hard-launch sends | **Two WhatsApp and two email messages per registered user** — *know your candidates* and *find your polling booth* (decided 2026-08-16). At ₹1.50 a WhatsApp message against the 25,000-registration target: 50,000 messages, **₹75,000**, plus about **₹15,000** of login OTPs metered separately (§9.1). The same 50,000 emails cost about **₹3,000** on SendGrid's volume pricing. Nothing else goes out over WhatsApp in the candidate half of the campaign. |
 | Distribution | Partner-led (RWAs, civic orgs, press). **No paid acquisition** — it costs money the project lacks and undercuts the neutrality claim. |
@@ -288,7 +288,7 @@ Worth naming precisely because it will be tempting: **the 300,000-visitor target
 
 WhatsApp is forty days of Meta business verification, a committed sender number, domain warm-up and sixteen templates in an approval queue, and it is gated behind a published privacy policy. If it does not land in time, **the platform ships anonymous-only**: drop M4b (WhatsApp sending) and M10 (registered users), and change nothing else.
 
-What goes with them: the seven-send campaign calendar, the ~25,000 registration target — withdrawn rather than missed (§8) — and, because both require an account, **the two citizen contributions: flagging misinformation and voting on ward issues.** That last consequence is the one most easily overlooked. The correction loop in §6 does not disappear, but its citizen half does; curators keep correcting, and nothing arrives from the public to prompt them.
+What goes with them: the seven-send campaign calendar and the ~25,000 registration target — withdrawn rather than missed (§8). Anonymous issue voting and candidate-field reporting remain available, so the public correction loop continues without registration.
 
 What stays is most of the platform: ward discovery, booth lookup, ward issues and questions to ask candidates, report cards, comparison, voting logistics, results, donations, and both languages. Every one of those works without an account, which is why the loss is bounded.
 
@@ -420,3 +420,5 @@ Ordered by how much they cost to start and how much they cost to delay.
 11. **Build the nine unblocked milestones** — email sending, the ward finder, soft-launch readiness, candidate pages, admin, curator and transcriber tools, the affidavit pipeline, and hard-launch readiness (§11). The one part of this list that is entirely ours.
 
 Open questions: `docs/milestones.md` §17 (what the plan and the tracker still disagree about), `docs/election-timelines.md` §5 (what is not yet confirmed about the calendar), `docs/ksec-data-risk.md` §6 (whether the candidate data can be got at all).
+
+Anonymous reporting (2026-11-02): reports stay private, with no automatic public warning or data change. Browser/account/network limits and CAPTCHA reduce misuse; curators can dismiss spam submissions without closing legitimate reports on the same field. Anonymous visitors receive confirmation, not an outcome-history service.

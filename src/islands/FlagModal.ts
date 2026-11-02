@@ -1,47 +1,4 @@
-/**
- * Flag misinformation modal — the client-side half of Task 32 (IA §7.2,
- * PRD §6.1/§6.3). Built on `ModalController` (src/islands/ModalShell.ts)
- * over the `<dialog>` markup `src/components/FlagModal.astro` renders once
- * per page (from Base.astro, so it's present everywhere a "Flag an error"
- * action can appear — Ward.astro and Candidate.astro today;
- * in Task 41).
- *
- * GLOBAL OPENER + WIRING: `openFlagModal` is exported AND attached to
- * `window.bvOpenFlagModal`, and `initFlagModal` additionally wires every
- * `[data-flag-action]` element found on the page (its `data-ward-id` and
- * `data-flag-targets` — a JSON-encoded `FlagTarget[]` — carry everything
- * `openFlagModal` needs) so Ward.astro/Candidate.astro
- * never need their own per-page wiring script, mirroring how
- * `initRegisterLoginModal` wires `[data-me-slot]`/`[data-register-slot]`
- * from one call in Base.astro.
- *
- * AUTH GATING + RESUME (core concept 2 — "visible to all, gated at
- * submit"; IA §7.2 "if anonymous, the Register/Login modal shows first,
- * then this reopens"):
- *
- *   - ON OPEN: `openFlagModal` checks `/api/me` before ever showing the
- *     flag form. Anonymous -> `window.bvOpenRegisterLogin` opens FIRST,
- *     with `onSuccess: () => openFlagModal(opts)` — once auth completes,
- *     THIS function runs again, now authed, and shows the (still-empty,
- *     nothing was ever typed) flag form. Authed -> the flag form shows
- *     immediately.
- *     TEMPORARY: when the modal is not on the page (master-password mode),
- *     anonymous visitors are sent to the locale's /login with `next`.
- *   - ON SUBMIT: the already-open flag dialog is deliberately left open
- *     (not closed) while `window.bvOpenRegisterLogin` opens on top of it —
- *     native `<dialog>` supports stacked modals, and this means a 401 mid-
- *     flow (an idle-timed-out session) needs no separate "reopen with
- *     saved state" plumbing: the flag dialog was never torn down, so its
- *     fields (target, detail, source, suggested value) are exactly as the
- *     citizen left them. `onSuccess` re-POSTs the SAME captured request
- *     body directly (seamless resume, no need for the citizen to retype or
- *     even re-tap submit). If that resumed POST itself fails (429/400),
- *     the flag dialog is right there, still open, to show the inline
- *     error — the same code path a normal (non-resumed) failure uses.
- *
- * The URL never changes at any point in this flow — nothing here calls
- * `location.assign`/`history.pushState`/etc.
- */
+/** Anonymous candidate reporting: preserve the form on every failed submission. */
 import { ModalController, type ModalDialogLike, type FocusTarget } from './ModalShell';
 
 export type FlagTargetType = 'candidate_field' | 'ward_field' | 'ward_issue';
@@ -66,7 +23,7 @@ interface FlagFormState {
   sourceUrl: string | null;
 }
 
-type MeResponse = { anonymous: true } | { anonymous: false; [key: string]: unknown };
+
 
 interface Elements {
   dialog: HTMLDialogElement;
@@ -140,16 +97,6 @@ function findElements(root: ParentNode): Elements | null {
   };
 }
 
-async function fetchMe(): Promise<MeResponse | null> {
-  try {
-    const res = await fetch('/api/me');
-    if (!res.ok) return null;
-    return (await res.json()) as MeResponse;
-  } catch {
-    return null;
-  }
-}
-
 /** Renders the field/claim picker: a single pre-selected (hidden-input) target, or a radio list when there's more than one. */
 function renderTargetPicker(container: HTMLElement, targets: FlagTarget[]): void {
   container.innerHTML = '';
@@ -198,12 +145,6 @@ function clearErrors(): void {
   els.genericError.textContent = '';
 }
 
-function showSourceError(): void {
-  if (!els) return;
-  els.sourceError.hidden = false;
-  els.sourceError.textContent = els.msgSourceInvalid;
-}
-
 function showRateLimitError(): void {
   if (!els) return;
   els.rateLimitError.hidden = false;
@@ -243,54 +184,37 @@ function resetForm(): void {
   clearErrors();
 }
 
-async function postFlag(state: FlagFormState): Promise<Response> {
-  return fetch('/api/flags', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(state),
+async function captchaToken(): Promise<string | null> {
+  const siteKey = els?.dialog.dataset.recaptchaSiteKey ?? '';
+  if (!siteKey) return (!import.meta.env.PROD || ['localhost','127.0.0.1'].includes(location.hostname)) ? 'local-development' : null;
+  if (!window.grecaptcha) return null;
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(null), 8000);
+    window.grecaptcha!.ready(() => {
+      window.grecaptcha!.execute(siteKey,{ action:'candidate_flag' }).then(token => { clearTimeout(timer); resolve(token); }).catch(() => { clearTimeout(timer); resolve(null); });
+    });
   });
 }
-
-/**
- * Submits `state` and handles every outcome, INCLUDING re-submitting it
- * automatically once auth resumes on a 401 — see the module header's
- * "AUTH GATING + RESUME" note for why the flag dialog is deliberately left
- * open (not closed) across that handoff.
- */
+function showFeedback(key: string): void {
+  if (!els) return;
+  els.genericError.hidden = false;
+  els.genericError.textContent = text(els.dialog, `[data-msg-${key}]`) || els.msgGenericError;
+}
 async function submitFlagState(state: FlagFormState): Promise<void> {
-  let res: Response;
   try {
-    res = await postFlag(state);
-  } catch {
-    showGenericError();
-    return;
-  }
-
-  if (res.status === 401) {
-    requireLogin(() => {
-      void submitFlagState(state);
-    });
-    return;
-  }
-
-  if (res.status === 429) {
-    showRateLimitError();
-    return;
-  }
-
-  if (res.status === 400) {
-    showSourceError();
-    return;
-  }
-
-  if (res.ok) {
+    const identity = await fetch('/api/flags/identity', { method:'POST', headers:{ 'content-type':'application/json' } });
+    if (!identity.ok) { if (identity.status === 429) showRateLimitError(); else showFeedback('paused'); return; }
+    const recaptchaToken = await captchaToken();
+    if (!recaptchaToken) { showFeedback('verification'); return; }
+    const res = await fetch('/api/flags', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ ...state,recaptchaToken }) });
+    if (res.status === 429) { showRateLimitError(); return; }
+    if (!res.ok) { showFeedback(res.status === 403 ? 'verification' : res.status === 503 ? 'paused' : 'generic-error'); return; }
+    const result = await res.json();
+    if (result.state === 'already_reported') { showFeedback('already-reported'); return; }
     els?.controller.close();
-    if (els) showSuccessToast(els.msgSuccess);
+    if (els) showSuccessToast(result.state === 'already_reviewed' ? text(els.dialog,'[data-msg-already-reviewed]') : els.msgSuccess);
     resetForm();
-    return;
-  }
-
-  showGenericError();
+  } catch { showGenericError(); }
 }
 
 function captureState(form: HTMLFormElement): FlagFormState | null {
@@ -318,6 +242,7 @@ async function onSubmit(event: SubmitEvent): Promise<void> {
   event.preventDefault();
   if (!els) return;
 
+  if (!els.form.reportValidity()) return;
   const state = captureState(els.form);
   if (!state) return;
 
@@ -336,7 +261,7 @@ function wireForm(e: Elements): void {
   });
 }
 
-/** Shows the flag form itself (called once auth is confirmed) — resets any prior state and (re)builds the picker for `opts.targets`. */
+/** Shows the flag form directly — resets any prior state and (re)builds the picker for `opts.targets`. */
 function showFlagForm(opts: OpenFlagModalOptions, opener?: FocusTarget | null): void {
   if (!els) return;
 
@@ -349,37 +274,6 @@ function showFlagForm(opts: OpenFlagModalOptions, opener?: FocusTarget | null): 
   els.controller.open(opener ?? undefined);
 }
 
-/**
- * Where an anonymous visitor goes when the Register/Login modal is not on
- * the page. TEMPORARY: that only happens in master-password mode
- * (src/lib/master-login.ts), which parks registration until email works
- * for OTP. Locale-aware, and carries the current page as `next`.
- */
-export function loginRedirectUrl(pathname: string, search: string): string {
-  const isKannada = pathname === '/kn' || pathname.startsWith('/kn/');
-  return `${isKannada ? '/kn/login' : '/login'}?next=${encodeURIComponent(pathname + search)}`;
-}
-
-/**
- * The one place that decides how an unauthenticated person signs in: open
- * the Register/Login modal (resuming via `onSuccess`) when it is on the
- * page, otherwise — TEMPORARY master-password mode — navigate to /login.
- */
-function requireLogin(onSuccess: () => void): void {
-  if (window.bvOpenRegisterLogin) {
-    window.bvOpenRegisterLogin({ onSuccess });
-  } else {
-    location.assign(loginRedirectUrl(location.pathname, location.search));
-  }
-}
-
-/**
- * Opens the Flag misinformation modal (IA §7.2). Anonymous visitors are
- * shown Register/Login FIRST — this function itself re-runs as that
- * flow's `onSuccess`, so `opts` (the SAME targets/wardId) is preserved
- * across the handoff with no extra state-passing needed. Safe no-op if the
- * modal markup isn't present on this page.
- */
 export function openFlagModal(opts: OpenFlagModalOptions, opener?: FocusTarget | null): void {
   if (!els) {
     els = findElements(document);
@@ -387,14 +281,7 @@ export function openFlagModal(opts: OpenFlagModalOptions, opener?: FocusTarget |
     wireForm(els);
   }
 
-  void fetchMe().then((me) => {
-    if (!me || me.anonymous) {
-      requireLogin(() => openFlagModal(opts, opener));
-      return;
-    }
-
-    showFlagForm(opts, opener);
-  });
+  showFlagForm(opts, opener);
 }
 
 declare global {

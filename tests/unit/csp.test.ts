@@ -11,7 +11,7 @@ const MAPS_SCRIPT_SRC = 'https://maps.googleapis.com https://maps.gstatic.com';
 
 describe('src/lib/csp.ts#buildCsp', () => {
   describe('base policy', () => {
-    it.each(['/', '/candidate/some-slug', '/account', '/api/me'])(
+    it.each(['/', '/account', '/api/me'])(
       '%s: strict script-src with the exact nonce interpolated, no unsafe-inline',
       (pathname) => {
         const csp = buildCsp(NONCE, pathname);
@@ -107,7 +107,7 @@ describe('src/lib/csp.ts#buildCsp', () => {
   });
 
   describe('ward detail extension (anonymous-vote reCAPTCHA v3)', () => {
-    it.each(['/ward/57', '/kn/ward/57', '/ward/57/'])('%s permits the reCAPTCHA script and frame', (pathname) => {
+    it.each(['/ward/57', '/kn/ward/57', '/ward/57/', '/candidate/some-slug', '/kn/candidate/some-slug/'])('%s permits the reCAPTCHA script and frame', (pathname) => {
       const csp = buildCsp(NONCE, pathname);
       expect(csp).toContain('https://www.google.com');
       expect(csp).toContain('https://www.gstatic.com');

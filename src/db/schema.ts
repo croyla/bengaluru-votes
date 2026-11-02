@@ -280,18 +280,42 @@ export const flagItems = pgTable('flag_items', {          // deduped queue item 
   resolutionReason: text('resolution_reason'),
   resolvedBy: integer('resolved_by'),
   resolvedAt: timestamp('resolved_at'),
+  resolvedValueHash: text('resolved_value_hash'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (t) => [uniqueIndex('flag_dedupe_uq').on(t.targetRef).where(sql`status = 'pending'`)]);
 
 export const flagSubmissions = pgTable('flag_submissions', {
   id: serial('id').primaryKey(),
   flagItemId: integer('flag_item_id').notNull().references(() => flagItems.id),
-  userId: integer('user_id').notNull().references(() => users.id),
+  userId: integer('user_id').references(() => users.id),
+  browserHash: text('browser_hash'),
+  fingerprint: text('fingerprint'),
+  isSpam: boolean('is_spam').notNull().default(false),
+  moderatedBy: integer('moderated_by'),
+  moderatedAt: timestamp('moderated_at'),
+  moderationReason: text('moderation_reason'),
   detail: text('detail').notNull(),
   suggestedValue: text('suggested_value'),
   sourceUrl: text('source_url'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+}, (t) => [
+  uniqueIndex('flag_browser_item_uq').on(t.flagItemId, t.browserHash).where(sql`${t.browserHash} is not null`),
+  uniqueIndex('flag_account_item_uq').on(t.flagItemId, t.userId).where(sql`${t.fingerprint} is not null and ${t.userId} is not null`),
+  index('flag_submission_item_idx').on(t.flagItemId, t.id),
+]);
+
+/** Short-lived admission metadata; separate from report content. */
+export const flagAdmissions = pgTable('flag_admissions', {
+  id: serial('id').primaryKey(), browserHash: text('browser_hash'), networkHash: text('network_hash'),
+  userId: integer('user_id').references(() => users.id, {onDelete:'set null'}),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, t => [index('flag_admission_browser_idx').on(t.browserHash,t.createdAt),index('flag_admission_network_idx').on(t.networkHash,t.createdAt),index('flag_admission_user_idx').on(t.userId,t.createdAt)]);
+export const flagRequestBuckets = pgTable('flag_request_buckets', {
+  networkHash:text('network_hash').notNull(),minute:timestamp('minute').notNull(),count:integer('count').notNull(),
+},t => [primaryKey({columns:[t.networkHash,t.minute]})]);
+export const flagMetrics = pgTable('flag_metrics', {
+  hour:timestamp('hour').notNull(),event:text('event').notNull(),count:integer('count').notNull().default(0),
+},t => [primaryKey({columns:[t.hour,t.event]})]);
 
 export const issueVoteSets = pgTable('issue_vote_sets', {
   id: serial('id').primaryKey(),

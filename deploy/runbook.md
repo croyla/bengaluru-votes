@@ -873,3 +873,28 @@ is deliberately not rewritten. What has changed since:
 Also deferred: no `AAAA` records. The box has a global IPv6 address, but its
 public reachability was never confirmed, so publishing one risks breaking
 v6 clients and the next renewal. Add only after testing from a v6 network.
+
+
+## Anonymous candidate reports
+
+Reporting needs no account. Before rollout configure `FLAGS_ABUSE_SECRET` to a dedicated cryptographically random secret of at least 32 characters (for example, `openssl rand -hex 32`); keep it in the production environment file, never in Git. Missing/short secrets fail closed. Rotating it invalidates receipts and resets keyed network identifiers. The existing `RECAPTCHA_SITE_KEY` and `RECAPTCHA_SECRET_KEY` must work for the production hostname, with adequate billing/quota. Verify a real `candidate_flag` action; provider errors/quota responses and timeouts fail closed even if accompanied by success/high score.
+
+Production Compose sets `FLAGS_TRUST_PROXY=true`. nginx overwrites `X-Flag-Client-IP` with `$remote_addr` on both reporting endpoints. Never expose the app port to the internet or add an untrusted proxy hop. The local stack uses the direct peer and must leave this switch unset; requests containing X-Forwarded-For are rejected because the Astro adapter otherwise treats that value as its client address. An added CDN requires an explicitly trusted real-IP configuration before rollout; do not consume client-supplied X-Forwarded-For.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FLAGS_SUBMISSIONS_PAUSED` | unset | Exactly `true` rejects new report/receipt requests with 503; curator work and reading continue. |
+| `FLAGS_REPORTER_BURST_LIMIT` | 3 | New accepted reports per browser and account in rolling 10 minutes. |
+| `FLAGS_REPORTER_DAILY_LIMIT` | 10 | New accepted reports per browser and account in rolling 24 hours. |
+| `FLAGS_NETWORK_DAILY_LIMIT` | 100 | New accepted reports per hashed network address in rolling 24 hours. |
+| `FLAGS_CAPTCHA_MIN_SCORE` | 0.5 | Server-verified minimum score (0–1). |
+
+nginx independently limits receipt initialization and submission together to 10 requests/minute/IP with burst 5 and a 32 KiB request body. The application also limits these requests to 15 per minute bucket before CAPTCHA. Shared mobile/apartment networks can hit these limits; monitor refusals and adjust using observed legitimate traffic. Do not impose a small global report cap or automatically rank candidates by complaints.
+
+Siva/admin should inspect the `/admin` report counters and oldest pending report during rollout; curators inspect grouped reports and prior reviews. A warning appears when the current UTC hour has at least 20 accepted reports and exceeds three times the preceding hour's count. This is a local dashboard warning, not an outbound alert. Counters exclude submitted text, links and identifiers.
+
+For an attack, set `FLAGS_SUBMISSIONS_PAUSED=true` in the production env file and recreate the app with the existing production Compose command (`docker compose -f deploy/compose.production.yml up -d --no-deps app`, using the usual env-file/tag overrides). Confirm a real POST returns 503 and curator pages remain usable. Remove/set false and recreate to resume; verify a real browser report. Configuration changes are runtime changes, except the existing build-time origin rules still apply.
+
+`flag-cleanup.ts` runs daily at 06:15 in the jobs container's timezone, independently of `RETENTION_ENABLED`. It clears browser/report linkage after 30 days, network hashes after 48 hours, closed duplicate/value fingerprints after 7 days, request buckets after 48 hours and aggregate counters after 30 days. Expiry is enforced by admission queries; physical deletion happens by the next successful run. Check `/var/log/gba-jobs/flag-cleanup.log` for success; replay with `tsx jobs/flag-cleanup.ts` in the jobs container if needed. Report text and existing account associations follow the existing policy, not this short-lived cleanup.
+
+Existing nginx access logs may contain raw IPs. The official nginx image normally directs access/error logs to stdout/stderr and Compose rotates JSON logs at 10 MB × 5 files; this is a size bound, not a fixed time retention. Verify deployed symlinks/log driver before finalizing the privacy policy. Do not claim the entire system stores no raw IPs.

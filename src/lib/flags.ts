@@ -32,13 +32,15 @@
  * transaction (still open) can then re-SELECT the winner's row and
  * proceed with the submission as normal.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql, or } from 'drizzle-orm';
 import { db, type Tx } from '../db/client';
-import { candidates, flagItems, flagSubmissions } from '../db/schema';
+import { candidates, candidateFields, flagItems, flagSubmissions } from '../db/schema';
 import { FLAGGABLE_FIELD_KEYS } from './candidate-profile';
 import { isUniqueViolation } from './db-errors';
 import { moveCandidateWard, publishAffidavitFields, type FieldData } from './affidavit-publish';
 import { translateFieldSoon } from './translate-runtime';
+import { createHash } from 'node:crypto';
+import { flagLock, lockReporter, checkFlagAllowance, recordFlagAdmission, reportFingerprint, metric, type FlagReporter } from './flag-abuse';
 
 export type FlagTargetType = 'candidate_field' | 'ward_field' | 'ward_issue';
 
@@ -87,6 +89,8 @@ export async function deriveTargetWardId(targetType: FlagTargetType, targetRef: 
   if (targetType !== 'candidate_field') throw new InvalidFlagTargetError();
   const match = /^candidate:(\d+):(.+)$/.exec(targetRef);
   if (!match || !(FLAGGABLE_FIELD_KEYS as readonly string[]).includes(match[2]!)) throw new InvalidFlagTargetError();
+  const candidateId = Number(match[1]);
+  if (!Number.isSafeInteger(candidateId) || candidateId < 1 || candidateId > 2147483647 || String(candidateId) !== match[1]) throw new InvalidFlagTargetError();
   const [row] = await db.select({ wardId: candidates.wardId }).from(candidates).where(eq(candidates.id, Number(match[1])));
   if (!row) throw new InvalidFlagTargetError();
   return row.wardId;
@@ -171,6 +175,48 @@ export async function submitFlag(userId: number, input: SubmitFlagInput): Promis
   return { flagItemId };
 }
 
+export interface FlagResult { state: 'accepted' | 'duplicate' | 'already_reported' | 'already_reviewed'; flagItemId?: number }
+
+/** Canonical published value, including translations and unreadable/not-declared state. */
+export async function flagValueHash(tx: Tx, targetRef: string): Promise<string> {
+  const [, id, key] = targetRef.split(':');
+  let value: unknown;
+  if (key === 'ward') {
+    const [c] = await tx.select({ wardId: candidates.wardId }).from(candidates).where(eq(candidates.id, Number(id)));
+    value = c ?? null;
+  } else {
+    const [f] = await tx.select({ en: candidateFields.valueEn, kn: candidateFields.valueKn, data: candidateFields.valueData, unreadable: candidateFields.unreadable, notDeclared: candidateFields.notDeclared }).from(candidateFields).where(and(eq(candidateFields.candidateId, Number(id)), eq(candidateFields.fieldKey, key!)));
+    value = f ?? null;
+  }
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+/** Public admission. Locks target and all reporter budgets before checking/inserting. */
+export async function submitPublicFlag(who: FlagReporter, input: SubmitFlagInput): Promise<FlagResult> {
+  const wardId = await deriveTargetWardId(input.targetType, input.targetRef);
+  const fingerprint = reportFingerprint(input);
+  return db.transaction(async tx => {
+    await flagLock(tx, `target:${input.targetRef}`);
+    await lockReporter(tx, who);
+    const valueHash = await flagValueHash(tx, input.targetRef);
+    const reviewed = await tx.execute(sql`select i.id from flag_items i join flag_submissions s on s.flag_item_id=i.id
+      where i.target_ref=${input.targetRef} and i.status<>'pending' and i.resolved_at>now()-interval '7 days'
+      and i.resolved_value_hash=${valueHash} and s.fingerprint=${fingerprint} limit 1`);
+    if (reviewed.length) { await metric('duplicate', tx); return { state: 'already_reviewed' }; }
+    const pending = await selectPending(tx, input.targetRef);
+    if (pending) {
+      const [prior] = await tx.select().from(flagSubmissions).where(and(eq(flagSubmissions.flagItemId,pending.id),
+        or(and(eq(flagSubmissions.browserHash,who.browserHash), sql`${flagSubmissions.createdAt}>now()-interval '30 days'`), who.userId !== null ? eq(flagSubmissions.userId,who.userId) : sql`false`))).limit(1);
+      if (prior) { await metric('duplicate', tx); return { state: prior.fingerprint === fingerprint ? 'duplicate' : 'already_reported', flagItemId: pending.id }; }
+    }
+    await checkFlagAllowance(tx, who);
+    const id = pending?.id ?? await findOrCreatePendingItem(tx,input,wardId);
+    await tx.insert(flagSubmissions).values({ flagItemId: id, userId: who.userId, browserHash: who.browserHash, fingerprint, detail: input.detail, suggestedValue: input.suggestedValue ?? null, sourceUrl: input.sourceUrl ?? null });
+    await recordFlagAdmission(tx,who);
+    return { state: 'accepted', flagItemId: id };
+  });
+}
+
 /**
  * Resolves a queue item (curator/admin only — PRD §6.1). Both roles are
  * city-wide, so there is no per-ward check.
@@ -209,6 +255,9 @@ export async function resolveFlag(
   resolution: ResolveFlagResolution,
 ): Promise<void> {
   const translate = await db.transaction(async (tx) => {
+    const [reference] = await tx.select({ targetRef: flagItems.targetRef }).from(flagItems).where(eq(flagItems.id, flagItemId));
+    if (!reference) throw new Error('flag_already_resolved');
+    await flagLock(tx, `target:${reference.targetRef}`);
     const [item] = await tx.select().from(flagItems).where(eq(flagItems.id, flagItemId)).for('update');
 
     if (!item || item.status !== 'pending') {
@@ -226,7 +275,7 @@ export async function resolveFlag(
 
       await tx
         .update(flagItems)
-        .set({ status: 'accepted', resolutionReason: null, resolvedBy: actor.userId, resolvedAt: new Date() })
+        .set({ status: 'accepted', resolutionReason: null, resolvedBy: actor.userId, resolvedAt: new Date(), resolvedValueHash: await flagValueHash(tx, item.targetRef) })
         .where(and(eq(flagItems.id, flagItemId), eq(flagItems.status, 'pending')));
 
       return needsTranslation;
@@ -237,6 +286,7 @@ export async function resolveFlag(
       .set({
         status: 'rejected',
         resolutionReason: resolution.reason,
+        resolvedValueHash: await flagValueHash(tx, item.targetRef),
         resolvedBy: actor.userId,
         resolvedAt: new Date(),
       })
@@ -249,4 +299,24 @@ export async function resolveFlag(
   // start a translation for a value that was never written. A reject, a
   // ward move and a fix whose English text did not change hand back nothing.
   for (const fieldId of translate) translateFieldSoon({ table: 'candidate_fields', id: fieldId });
+}
+
+/** Spam moderation never changes candidate data and never closes others' active reports. */
+export async function markFlagSpam(actor: { userId: number; role: 'curator' | 'admin' }, itemId: number, ids: number[], reason: string): Promise<void> {
+  const selected = [...new Set(ids)];
+  if (!selected.length || selected.length > 20 || selected.some(id => !Number.isSafeInteger(id) || id <= 0) || !reason.trim() || reason.length > 1000) throw new Error('invalid_spam_selection');
+  await db.transaction(async tx => {
+    const [reference] = await tx.select().from(flagItems).where(eq(flagItems.id,itemId));
+    if (!reference) throw new Error('flag_already_resolved');
+    await flagLock(tx, `target:${reference.targetRef}`);
+    const [item] = await tx.select().from(flagItems).where(eq(flagItems.id,itemId)).for('update');
+    if (item!.status !== 'pending') throw new Error('flag_already_resolved');
+    const matches = await tx.select().from(flagSubmissions).where(and(eq(flagSubmissions.flagItemId,itemId),sql`${flagSubmissions.id} in (${sql.join(selected.map(id => sql`${id}`),sql`,`)})`));
+    if (matches.length !== selected.length) throw new Error('invalid_spam_selection');
+    const changed = matches.filter(s => !s.isSpam);
+    for (const submission of changed) await tx.update(flagSubmissions).set({isSpam:true,moderatedBy:actor.userId,moderatedAt:new Date(),moderationReason:reason.trim()}).where(eq(flagSubmissions.id,submission.id));
+    if (changed.length) await metric('spam',tx,changed.length);
+    const [active] = await tx.select({ id:flagSubmissions.id }).from(flagSubmissions).where(and(eq(flagSubmissions.flagItemId,itemId),eq(flagSubmissions.isSpam,false))).limit(1);
+    if (!active) await tx.update(flagItems).set({status:'rejected',resolutionReason:'spam',resolvedBy:actor.userId,resolvedAt:new Date(),resolvedValueHash:await flagValueHash(tx,item!.targetRef)}).where(eq(flagItems.id,itemId));
+  });
 }

@@ -138,7 +138,8 @@ export function buildCsp(nonce: string, pathname: string): string {
   const scriptSrcHosts = ['https://www.googletagmanager.com', ...MAPS_HOSTS];
   let frameSrc = "'none'";
 
-  if (isWardDetailPath(pathname)) {
+  const needsCaptcha = isWardDetailPath(pathname) || /^\/candidate\/[^/]+$/.test(stripTrailingSlash(stripLocalePrefix(pathname)));
+  if (needsCaptcha) {
     scriptSrcHosts.push('https://www.google.com', 'https://www.gstatic.com');
     frameSrc = 'https://www.google.com';
   }
@@ -161,7 +162,7 @@ export function buildCsp(nonce: string, pathname: string): string {
     `style-src 'self' 'unsafe-inline' ${MAPS_FONT_STYLE_HOST}`,
     `img-src 'self' data: https://www.googletagmanager.com https://*.google-analytics.com ${MAPS_HOSTS.join(' ')}`,
     `font-src 'self' ${MAPS_FONT_FILE_HOST}`,
-    `connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com ${MAPS_HOSTS.join(' ')} ${PLACES_RPC_HOST}`,
+    `connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com ${MAPS_HOSTS.join(' ')} ${PLACES_RPC_HOST}${needsCaptcha ? ' https://www.google.com/recaptcha/' : ''}`,
     `worker-src 'self' blob:`,
     `frame-src ${frameSrc}`,
   ];

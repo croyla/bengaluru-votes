@@ -11,7 +11,7 @@
  * the synchronizer CSRF token on every unsafe method here. Nothing in this
  * module re-checks either; it trusts the `userId` it's given.
  */
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client';
 import { flagItems, flagSubmissions, users, wards, type flagStatusEnum } from '../db/schema';
 import { isUniqueViolation } from './db-errors';
@@ -268,8 +268,8 @@ export async function loadSubmissions(userId: number): Promise<SubmissionRow[]> 
       suggestedValue: flagSubmissions.suggestedValue,
       sourceUrl: flagSubmissions.sourceUrl,
       createdAt: flagSubmissions.createdAt,
-      status: flagItems.status,
-      resolutionReason: flagItems.resolutionReason,
+      status: sql<SubmissionRow['status']>`case when ${flagSubmissions.isSpam} then 'rejected'::flag_status else ${flagItems.status} end`,
+      resolutionReason: sql<string | null>`case when ${flagSubmissions.isSpam} then null else ${flagItems.resolutionReason} end`,
       targetRef: flagItems.targetRef,
     })
     .from(flagSubmissions)

@@ -123,3 +123,15 @@ describe('verifyRecaptcha', () => {
     expect(receivedSecret).toBe('opts-secret');
   });
 });
+
+describe('flag CAPTCHA hardening', () => {
+  it('rejects provider errors even with success and high score', async () => {
+    expect((await verifyRecaptcha('t', { secret: 'test', verifier: async () => ({ success: true, score: .9, errorCodes: ['Over free quota.'] }) })).ok).toBe(false);
+  });
+  it('rejects a token from another hostname', async () => {
+    expect((await verifyRecaptcha('t', { secret: 'test', expectedHostname: 'example.com', verifier: async () => ({ success: true, score: .9, hostname: 'other.com' }) })).ok).toBe(false);
+  });
+  it('handles provider transport failures as unavailable', async () => {
+    expect((await verifyRecaptcha('t', { secret: 'test', verifier: async () => { throw new Error('timeout'); } })).reason).toBe('unavailable');
+  });
+});
