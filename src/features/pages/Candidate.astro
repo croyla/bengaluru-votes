@@ -24,7 +24,6 @@ import {
   FLAGGABLE_FIELD_KEYS,
   pickCandidateValue,
 } from '../../lib/candidate-profile';
-import { getKnownSetting } from '../../lib/settings';
 import { personLd, breadcrumbLd } from '../../lib/seo';
 
 interface Props {
@@ -104,9 +103,6 @@ const profileFields = CANDIDATE_PROFILE_FIELD_KEYS.map((key) => {
   };
 });
 
-const withdrawalsClosedSetting = await getKnownSetting('withdrawals_closed');
-const isProvisional = withdrawalsClosedSetting !== 'true';
-
 const showStatusBanner = row?.status === 'withdrawn' || row?.status === 'rejected';
 
 const pagePath = `/candidate/${slug}`;
@@ -153,7 +149,6 @@ const candidateJsonLd = row
   {
     row ? (
       <div class="candidate">
-        {isProvisional && <p class="provisional-marker">{t(lang, 'candidate.provisionalMarker')}</p>}
 
         {showStatusBanner && (
           <Banner kind="notice" lang={lang}>
@@ -268,13 +263,6 @@ const candidateJsonLd = row
       width: 100%;
       border-right: 0;
     }
-  }
-
-  .provisional-marker {
-    margin: 0;
-    font-size: var(--text-sm);
-    font-style: italic;
-    color: var(--color-text-muted);
   }
 
   .candidate-header {

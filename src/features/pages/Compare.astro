@@ -153,9 +153,6 @@ const candidateRowShapes: (CandidateRowCandidate & { id: number })[] = compareCa
   photoUrl: c.photoUrl,
 }));
 
-const withdrawalsClosedSetting = await getKnownSetting('withdrawals_closed');
-const isProvisional = withdrawalsClosedSetting !== 'true';
-
 const notificationDateSetting = await getKnownSetting('notification_date');
 const emptyFact = notificationDateSetting
   ? t(lang, 'compare.empty.fact', { date: notificationDateSetting })
@@ -191,7 +188,6 @@ const description = ward ? t(lang, 'compare.meta.description', { wardName }) : t
               <EmptyState fact={emptyFact} />
             ) : (
               <>
-                {isProvisional && <p class="provisional-marker">{t(lang, 'candidate.provisionalMarker')}</p>}
 
                 <p class="scroll-hint" id="compare-scroll-hint">{t(lang, 'compare.scrollHint')}</p>
                 <div class="compare-scroll" role="region" aria-label={t(lang, 'compare.table.caption')} aria-describedby="compare-scroll-hint" tabindex="0">
@@ -322,15 +318,6 @@ const description = ward ? t(lang, 'compare.meta.description', { wardName }) : t
   .comparison-content {
     display: grid;
     gap: var(--space-4);
-  }
-
-  .provisional-marker {
-    padding: var(--space-4);
-    border-radius: var(--radius-md);
-    background: var(--color-accent-surface);
-    color: var(--color-on-accent);
-    font-size: var(--text-sm);
-    line-height: var(--leading-sm);
   }
 
   .scroll-hint {

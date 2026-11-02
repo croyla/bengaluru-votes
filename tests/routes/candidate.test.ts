@@ -437,32 +437,13 @@ describe('Candidate report card (/candidate/{slug}, /kn/candidate/{slug}) — IA
     });
   });
 
-  describe('provisional marker (app_settings.withdrawals_closed, PRD §5.2/§9.3)', () => {
-    it('shown when withdrawals_closed is not set to "true"', async () => {
-      await db
-        .insert(schema.appSettings)
-        .values({ key: 'withdrawals_closed', value: 'false' })
-        .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: 'false' } });
-
-      const html = normalize(await (await renderCandidate('en', MAIN_SLUG)).text());
-      expect(html).toContain(t('en', 'candidate.provisionalMarker'));
-    });
-
-    it('hidden once withdrawals_closed is "true"', async () => {
-      await db
-        .insert(schema.appSettings)
-        .values({ key: 'withdrawals_closed', value: 'true' })
-        .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: 'true' } });
-
-      const html = normalize(await (await renderCandidate('en', MAIN_SLUG)).text());
-      expect(html).not.toContain(t('en', 'candidate.provisionalMarker'));
-
-      // Restore the "not closed" state for any other test in this file that
-      // runs after this one (test order isn't otherwise significant here).
-      await db
-        .insert(schema.appSettings)
-        .values({ key: 'withdrawals_closed', value: 'false' })
-        .onConflictDoUpdate({ target: schema.appSettings.key, set: { value: 'false' } });
-    });
+  it.each(['false', 'true'])('omits the provisional notice when withdrawals_closed is %s', async (value) => {
+    await db.insert(schema.appSettings)
+      .values({ key: 'withdrawals_closed', value })
+      .onConflictDoUpdate({ target: schema.appSettings.key, set: { value } });
+    for (const lang of ['en', 'kn'] as const) {
+      const html = normalize(await (await renderCandidate(lang, MAIN_SLUG)).text());
+      expect(html).not.toContain('provisional-marker');
+    }
   });
 });

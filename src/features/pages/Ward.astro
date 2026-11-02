@@ -119,7 +119,6 @@ const sortedCandidates: (CandidateRowCandidate & { id: number; status: string })
     status: candidate.status,
   }))
   .sort((a, b) => a.nameEn.localeCompare(b.nameEn) || a.id - b.id);
-const isCandidateListProvisional = (await getKnownSetting('withdrawals_closed')) !== 'true';
 const notificationDate = await getKnownSetting('notification_date');
 const candidateEmptyFact = notificationDate
   ? t(lang, 'ward.candidates.empty.fact', { date: notificationDate })
@@ -287,7 +286,6 @@ const wardJsonLd = ward ? [placeLd({ id: wardId, name: wardName, path: localePat
             <p class="candidate-empty">{candidateEmptyFact}</p>
           ) : (
             <>
-              {isCandidateListProvisional && <p class="provisional-marker">{t(lang, 'candidate.provisionalMarker')}</p>}
               <ul class="candidate-list" aria-label={t(lang, 'ward.candidates.list.label')}>
                 {sortedCandidates.map((candidate) => (
                   <li class="candidate-item">
@@ -683,8 +681,7 @@ const wardJsonLd = ward ? [placeLd({ id: wardId, name: wardName, path: localePat
   }
 
   .ward-candidates h2,
-  .candidate-empty,
-  .provisional-marker {
+  .candidate-empty {
     margin: 0;
   }
 
@@ -699,20 +696,13 @@ const wardJsonLd = ward ? [placeLd({ id: wardId, name: wardName, path: localePat
   }
 
   .candidate-empty,
-  .provisional-marker,
   .status-label {
     color: var(--color-text-muted);
   }
 
-  .candidate-empty,
-  .provisional-marker {
+  .candidate-empty {
     font-size: 0.95rem;
     line-height: 1.6;
-  }
-
-  .provisional-marker {
-    font-size: var(--text-sm);
-    font-style: italic;
   }
 
   .candidate-list {

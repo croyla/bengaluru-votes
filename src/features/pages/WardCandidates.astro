@@ -106,9 +106,6 @@ const sortedCandidates: (CandidateRowCandidate & { id: number; status: string })
   }))
   .sort((a, b) => a.nameEn.localeCompare(b.nameEn) || a.id - b.id);
 
-const withdrawalsClosedSetting = await getKnownSetting('withdrawals_closed');
-const isProvisional = withdrawalsClosedSetting !== 'true';
-
 const notificationDateSetting = await getKnownSetting('notification_date');
 const emptyFact = notificationDateSetting
   ? t(lang, 'ward.candidates.empty.fact', { date: notificationDateSetting })
@@ -148,7 +145,6 @@ const description = ward
           </EmptyState>
         ) : (
           <>
-            {isProvisional && <p class="provisional-marker">{t(lang, 'candidate.provisionalMarker')}</p>}
 
             <ul class="candidate-list" aria-label={t(lang, 'ward.candidates.list.label')}>
               {sortedCandidates.map((candidate) => (
@@ -207,13 +203,6 @@ const description = ward
 
   .subheading {
     margin: 0;
-    color: var(--color-text-muted);
-  }
-
-  .provisional-marker {
-    margin: 0;
-    font-size: var(--text-sm);
-    font-style: italic;
     color: var(--color-text-muted);
   }
 
