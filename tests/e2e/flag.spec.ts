@@ -42,7 +42,6 @@ const E2E_FLAG_AGES = [41, 42] as const;
 
 const candidateSlug = seedFixtures.candidateSlug;
 const candidateId = seedFixtures.candidateId;
-const wardId = seedFixtures.primaryWardId;
 const targetRef = `candidate:${candidateId}:${E2E_FLAG_FIELD_KEY}`;
 const RUN_MARKER = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 // A distinctive-per-run detail string: the flag_items dedupe (flag_dedupe_uq,
@@ -143,7 +142,7 @@ test('citizen flags a candidate field, curator accepts + publishes, correction g
   await fixForm.locator('input[name="confirmPublish"]').check();
   await fixForm.getByRole('button', { name: 'Fix and publish' }).click();
 
-  await expect(curatorPage).toHaveURL(/\/curator\/queue$/);
+  await expect(curatorPage).toHaveURL(/\/curator\/queue\?resolved=accepted$/);
 
   // --- back to the PUBLIC page, a fresh load, no session at all -----------
   const publicContext = await browser.newContext();
