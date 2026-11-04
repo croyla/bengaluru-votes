@@ -49,9 +49,9 @@ GBA candidates execute the affidavit on paid stamp paper and have it **notarised
 
 - Ward-wise draft voter list published 9 March 2026; affidavit format gazetted 22 April 2026.
 - The Supreme Court has set **31 December 2026** as the deadline for the GBA polls and said no further extension will be granted ([South First](https://thesouthfirst.com/karnataka/supreme-court-extends-deadline-to-conduct-greater-bengaluru-authority-polls-to-31-december/)).
-- **As of 4 November 2026 no schedule has been announced.** What the deadline implies for the announcement date is in [election-timelines.md](election-timelines.md) §4.
+- **As of 4 November 2026 no schedule has been announced.**
 
-**The acquisition window** is nominations open to scrutiny: about N+5 to N+13 on the assumed timeline (election-timelines.md §3). Collection that is not staffed and rehearsed before the announcement may miss it, and an RTI reply may then arrive after the poll.
+**The acquisition window** is nominations open to scrutiny: roughly days 5 to 13 after the schedule is announced. Collection that is not staffed and rehearsed before the announcement may miss it, and an RTI reply may then arrive after the poll.
 
 ## 5. Acquisition options
 

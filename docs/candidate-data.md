@@ -1,6 +1,6 @@
 # Candidate data operations
 
-How roughly 4,000 GBA candidate affidavits across 369 wards become published, sourced report cards: who does each step, what the code does, and what it costs. Election dates are offsets from the announcement **N** in [election-timelines.md](election-timelines.md); whether the affidavits can be obtained at all is [ksec-data-risk.md](ksec-data-risk.md).
+How roughly 4,000 GBA candidate affidavits across 369 wards become published, sourced report cards: who does each step, what the code does, and what it costs. Election dates are offsets from the announcement **N**; whether the affidavits can be obtained at all is [ksec-data-risk.md](ksec-data-risk.md).
 
 ## 1. The pipeline
 
