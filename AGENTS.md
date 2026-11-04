@@ -211,7 +211,11 @@ Use normal Codex CLI sessions for implementation; do not route work through a ma
 
 Every new Codex session must start its own instance of Docker Compose, configured to listen on a different host port from other active sessions. After starting it, present the resulting review URL to the user so they can inspect the changes directly.
 
-For parallel work, create one project-local `.worktrees/<short-task-name>` worktree and one descriptive branch (for example, `codex/<short-task-name>`) per session. Verify `.worktrees/` is ignored before creating it. Each session owns its worktree, keeps its changes focused, and reports its branch, commit, tests, and limitations. Do not use `git reset --hard`, `git checkout --`, or broad cleanup commands in a shared checkout.
+**Always use git worktrees**, whether or not other sessions are running: create one project-local `.worktrees/<short-task-name>` worktree and one descriptive branch (for example, `codex/<short-task-name>`) per task, and never edit files in the primary checkout. Verify `.worktrees/` is ignored before creating it. Each session owns its worktree, keeps its changes focused, and reports its branch, commit, tests, and limitations. Do not use `git reset --hard`, `git checkout --`, or broad cleanup commands in a shared checkout.
+
+**Every change raises a PR.** Push the worktree's branch and open a pull request against `main`; never commit or push to `main` directly, however small the change. If GitHub is unavailable, keep committing on the local branch and open the PR once it is back.
+
+**No Claude session links in commits or PRs.** Commit messages, PR descriptions and PR comments must not include `claude.ai/code/session_…` links (or any other agent-session URL), even when a tool's default attribution adds one.
 
 Keep the primary checkout for integration and release work. Before merging or cherry-picking another session's commit, inspect its diff and check that the target branch has no unrelated uncommitted changes. Integrate independent commits one at a time, resolve conflicts in the primary checkout, run the relevant verification, and only then push or deploy. If two sessions touch overlapping files, stop one or coordinate explicitly before integration; never rely on concurrent edits resolving themselves.
 
@@ -231,7 +235,7 @@ Treat the user's correcting instructions as authoritative project feedback, not 
 
 **Hierarchical navigation:** Use shared breadcrumbs above the title on ward and comparison pages instead of a standalone Back to ward button. The ward breadcrumb includes both its citizen-facing number and localized name (for example, “Ward 23 Jogpalya”), never the composite route id. Ancestors are links; the current page is noninteractive. Keep the pattern documented in the design system.
 
-**Approval before integration:** Once a requested change is implemented and verified, pause and ask the user once for approval to commit, merge, and push it. That single approval covers all three repository integration steps; do not ask for separate approvals.
+**Approval before integration:** Once a requested change is implemented and verified, pause and ask the user once for approval to commit, push, and open its PR. That single approval covers all three steps; do not ask for separate approvals. Merging happens through the PR.
 
 ## UI verification
 
