@@ -8,23 +8,18 @@ export const bytea = customType<{ data: Buffer }>({ dataType: () => 'bytea' });
 
 export const corporationEnum = pgEnum('corporation', ['north', 'south', 'east', 'west', 'central']);
 export const langEnum = pgEnum('lang', ['en', 'kn']);
-export const roleEnum = pgEnum('role', ['citizen', 'transcriber', 'curator', 'admin']);
+export const roleEnum = pgEnum('role', ['transcriber', 'curator', 'admin']);
 export const userStatusEnum = pgEnum('user_status', ['active', 'banned', 'erased']);
 export const candidateStatusEnum = pgEnum('candidate_status', ['filed', 'contesting', 'rejected', 'withdrawn']);
 export const sourceTypeEnum = pgEnum('source_type', ['official', 'curator']);
 export const translationStatusEnum = pgEnum('translation_status', ['pending', 'done', 'manual']);
 export const assignmentStateEnum = pgEnum('assignment_state', ['open', 'submitted', 'abandoned']);
 export const affidavitStateEnum = pgEnum('affidavit_state', ['queued', 'extracting', 'needs_matching', 'published', 'failed']);
-export const channelEnum = pgEnum('channel', ['email', 'whatsapp']);
-export const otpPurposeEnum = pgEnum('otp_purpose', ['auth', 'add_contact']);
-export const suppressionReasonEnum = pgEnum('suppression_reason', ['bounce', 'complaint', 'stop']);
 export const flagStatusEnum = pgEnum('flag_status', ['pending', 'accepted', 'rejected']);
 export const flagTargetEnum = pgEnum('flag_target', ['candidate_field', 'ward_field', 'ward_issue']);
 export const eoiPathEnum = pgEnum('eoi_path', ['awareness', 'curation']);
 export const eoiStatusEnum = pgEnum('eoi_status', ['new', 'accepted', 'declined']);
-export const sendCodeEnum = pgEnum('send_code', ['W1', 'R1', 'L1', 'C1', 'C2', 'C3', 'F1']);
-export const sendStatusEnum = pgEnum('send_status', ['sent', 'failed', 'suppressed', 'held']);
-export const budgetKindEnum = pgEnum('budget_kind', ['geocode', 'otp_send', 'news_query', 'epic_lookup', 'anonymous_vote']);
+export const budgetKindEnum = pgEnum('budget_kind', ['geocode', 'epic_lookup', 'anonymous_vote']);
 
 export const wards = pgTable('wards', {
   id: integer('id').primaryKey(),                      // corporation_id*1000 + per-corporation ward number (no city-wide official number exists in source data — see scripts/seed-wards.ts)
@@ -212,49 +207,11 @@ export const booths = pgTable('booths', {
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   email: text('email').unique(),                        // one account per contact
-  phone: text('phone').unique(),
-  homeWardId: integer('home_ward_id').references(() => wards.id),
   language: langEnum('language').notNull().default('en'),
-  role: roleEnum('role').notNull().default('citizen'),
+  role: roleEnum('role').notNull(),
   status: userStatusEnum('status').notNull().default('active'),
-  srcAttribution: text('src_attribution'),
-  consentAt: timestamp('consent_at'),
-  consentVersion: text('consent_version'),
-  futureToolsOptIn: boolean('future_tools_opt_in').notNull().default(false),
-  emailEnabled: boolean('email_enabled').notNull().default(true),   // /account/notifications toggles
-  whatsappEnabled: boolean('whatsapp_enabled').notNull().default(true),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
-
-/**
- * TEST ONLY — written to exclusively when `OTP_TEST_SINK === 'true'`
- * (src/lib/otp.ts's `requestOtp`), which must NEVER be set in production
- * (it defeats the hashed-storage protection `otp_codes.code_hash`
- * exists for by additionally persisting the plaintext code). This table
- * exists purely so the Playwright e2e suite (Task 64) — a real browser
- * driving the app as a separate process — can read the OTP code a request
- * generated, since it has no in-process access to `requestOtp`'s return
- * value. Empty and unused in every environment that doesn't set the flag.
- */
-export const otpTestCodes = pgTable('otp_test_codes', {
-  id: serial('id').primaryKey(),
-  destination: text('destination').notNull(),
-  code: text('code').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (t) => [index('otp_test_codes_destination_idx').on(t.destination, t.createdAt)]);
-
-export const otpCodes = pgTable('otp_codes', {
-  id: serial('id').primaryKey(),
-  destination: text('destination').notNull(),           // email address or +91… number
-  channel: channelEnum('channel').notNull(),
-  purpose: otpPurposeEnum('purpose').notNull().default('auth'),
-  userId: integer('user_id'),                           // set for add_contact
-  codeHash: text('code_hash').notNull(),                // sha256(code + SESSION_SECRET)
-  attempts: integer('attempts').notNull().default(0),   // invalidated at 5 (arch §7)
-  expiresAt: timestamp('expires_at').notNull(),
-  consumedAt: timestamp('consumed_at'),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (t) => [index('otp_destination_idx').on(t.destination, t.createdAt)]);
 
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey(),                          // random 32-byte hex
@@ -262,14 +219,6 @@ export const sessions = pgTable('sessions', {
   expiresAt: timestamp('expires_at').notNull(),         // sliding 1h idle
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
-
-export const suppressions = pgTable('suppressions', {
-  id: serial('id').primaryKey(),
-  contact: text('contact').notNull(),
-  channel: channelEnum('channel').notNull(),
-  reason: suppressionReasonEnum('reason').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (t) => [uniqueIndex('suppression_uq').on(t.contact, t.channel)]);
 
 export const flagItems = pgTable('flag_items', {          // deduped queue item
   id: serial('id').primaryKey(),
@@ -287,7 +236,6 @@ export const flagItems = pgTable('flag_items', {          // deduped queue item
 export const flagSubmissions = pgTable('flag_submissions', {
   id: serial('id').primaryKey(),
   flagItemId: integer('flag_item_id').notNull().references(() => flagItems.id),
-  userId: integer('user_id').references(() => users.id),
   browserHash: text('browser_hash'),
   fingerprint: text('fingerprint'),
   isSpam: boolean('is_spam').notNull().default(false),
@@ -300,35 +248,20 @@ export const flagSubmissions = pgTable('flag_submissions', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (t) => [
   uniqueIndex('flag_browser_item_uq').on(t.flagItemId, t.browserHash).where(sql`${t.browserHash} is not null`),
-  uniqueIndex('flag_account_item_uq').on(t.flagItemId, t.userId).where(sql`${t.fingerprint} is not null and ${t.userId} is not null`),
   index('flag_submission_item_idx').on(t.flagItemId, t.id),
 ]);
 
 /** Short-lived admission metadata; separate from report content. */
 export const flagAdmissions = pgTable('flag_admissions', {
   id: serial('id').primaryKey(), browserHash: text('browser_hash'), networkHash: text('network_hash'),
-  userId: integer('user_id').references(() => users.id, {onDelete:'set null'}),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-}, t => [index('flag_admission_browser_idx').on(t.browserHash,t.createdAt),index('flag_admission_network_idx').on(t.networkHash,t.createdAt),index('flag_admission_user_idx').on(t.userId,t.createdAt)]);
+}, t => [index('flag_admission_browser_idx').on(t.browserHash,t.createdAt),index('flag_admission_network_idx').on(t.networkHash,t.createdAt)]);
 export const flagRequestBuckets = pgTable('flag_request_buckets', {
   networkHash:text('network_hash').notNull(),minute:timestamp('minute').notNull(),count:integer('count').notNull(),
 },t => [primaryKey({columns:[t.networkHash,t.minute]})]);
 export const flagMetrics = pgTable('flag_metrics', {
   hour:timestamp('hour').notNull(),event:text('event').notNull(),count:integer('count').notNull().default(0),
 },t => [primaryKey({columns:[t.hour,t.event]})]);
-
-export const issueVoteSets = pgTable('issue_vote_sets', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id').notNull().references(() => users.id),
-  wardId: integer('ward_id').notNull().references(() => wards.id),
-  active: boolean('active').notNull().default(true),      // retired on home-ward change / re-cast
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-}, (t) => [uniqueIndex('active_set_uq').on(t.userId).where(sql`active`)]);
-
-export const issueVoteSelections = pgTable('issue_vote_selections', {
-  setId: integer('set_id').notNull().references(() => issueVoteSets.id, { onDelete: 'cascade' }),
-  wardIssueId: integer('ward_issue_id').notNull().references(() => wardIssues.id, { onDelete: 'cascade' }),
-}, (t) => [primaryKey({ columns: [t.setId, t.wardIssueId] })]);
 
 export const anonymousIssueVoteSets = pgTable('anonymous_issue_vote_sets', {
   id: serial('id').primaryKey(),
@@ -366,20 +299,9 @@ export const eoiSubmissions = pgTable('eoi_submissions', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
-export const campaignSends = pgTable('campaign_sends', {  // send-once ledger per user × code
-  id: serial('id').primaryKey(),
-  code: sendCodeEnum('code').notNull(),
-  userId: integer('user_id').notNull().references(() => users.id),
-  wardId: integer('ward_id').notNull(),
-  channel: channelEnum('channel').notNull(),
-  language: langEnum('language').notNull(),
-  status: sendStatusEnum('status').notNull(),
-  sentAt: timestamp('sent_at').notNull().defaultNow(),
-}, (t) => [uniqueIndex('send_once_uq').on(t.code, t.userId, t.channel)]);
-
 export const appSettings = pgTable('app_settings', {      // election anchors, wording versions
   key: text('key').primaryKey(),                          // 'notification_date' | 'election_date' |
-  value: text('value').notNull(),                         // 'roll_deadline' | 'consent_wording_version' | …
+  value: text('value').notNull(),                         // 'roll_deadline' | …
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 

@@ -7,7 +7,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { eq } from 'drizzle-orm';
 import { Fixtures, client, db, fieldRow, run, schema, tokenForm, ward, type Auth } from './support/staff-harness';
-import { submitFlag } from '../../src/lib/flags';
+import { submitPublicFlag } from '../../src/lib/flags';
+import { anonReporter } from '../support/reporter';
 import { t } from '../../src/i18n';
 import QueueItemRoute from '../../src/pages/curator/queue/[id].astro';
 
@@ -16,10 +17,10 @@ const WARD_A = ward(99411, 'Flag Fix Test Ward A');
 const WARD_B = ward(99412, 'Flag Fix Test Ward B');
 const fx = new Fixtures('curator-flag-fix-test-');
 let curator: Auth;
-let citizen: Auth;
+let transcriber: Auth;
 
 const item = (id: number, auth?: Auth, form?: FormData) => run(QueueItemRoute, `/curator/queue/${id}`, { auth, form, params: { id: String(id) } });
-const flag = async (candidateId: number, key: string) => (await submitFlag(citizen.userId, { targetType: 'candidate_field', targetRef: `candidate:${candidateId}:${key}`, detail: `The ${key} is wrong` })).flagItemId;
+const flag = async (candidateId: number, key: string) => (await submitPublicFlag(anonReporter(), { targetType: 'candidate_field', targetRef: `candidate:${candidateId}:${key}`, detail: `The ${key} is wrong` })).flagItemId!;
 const flagRow = async (id: number) => (await db.select().from(schema.flagItems).where(eq(schema.flagItems.id, id)))[0];
 const fix = (fields: Record<string, string>) => tokenForm(curator, { formAction: 'fix', confirmPublish: 'on', ...fields });
 
@@ -27,7 +28,7 @@ beforeAll(async () => {
   await migrate(db, { migrationsFolder: './drizzle' });
   await fx.wards(WARD_A, WARD_B);
   curator = await fx.person('curator');
-  citizen = await fx.person('citizen');
+  transcriber = await fx.person('transcriber');
 });
 
 afterAll(async () => {
@@ -36,9 +37,9 @@ afterAll(async () => {
 });
 
 describe('who may open a flag', () => {
-  it('refuses a citizen', async () => {
+  it('refuses a transcriber', async () => {
     const c = await fx.candidateWithAffidavit(WARD_A.id);
-    expect((await item(await flag(c.candidateId, 'age'), citizen)).status).toBe(403);
+    expect((await item(await flag(c.candidateId, 'age'), transcriber)).status).toBe(403);
   });
 });
 
@@ -190,11 +191,11 @@ describe('a flag on the ward', () => {
   });
 });
 
-describe('the source a citizen gave', () => {
+describe('the source a reporter gave', () => {
   const flagWithSource = async (sourceUrl: string) => {
     const c = await fx.candidateWithAffidavit(WARD_A.id);
-    const { flagItemId } = await submitFlag(citizen.userId, { targetType: 'candidate_field', targetRef: `candidate:${c.candidateId}:age`, detail: 'See the source', sourceUrl });
-    return (await item(flagItemId, curator)).text();
+    const { flagItemId } = await submitPublicFlag(anonReporter(), { targetType: 'candidate_field', targetRef: `candidate:${c.candidateId}:age`, detail: 'See the source', sourceUrl });
+    return (await item(flagItemId!, curator)).text();
   };
 
   it('is a link when it is a web address', async () => {

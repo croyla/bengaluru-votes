@@ -257,7 +257,7 @@ describe('Base layout — Google Analytics gating (Task 58)', () => {
 
   it('GA_MEASUREMENT_ID set but noindex (an authenticated-shaped page): renders NO GA snippet', async () => {
     process.env.GA_MEASUREMENT_ID = 'G-TEST123456';
-    const html = await renderBase('en', '/account', { noindex: true });
+    const html = await renderBase('en', '/curator', { noindex: true });
 
     expect(html).not.toContain('googletagmanager.com');
     expect(html).not.toContain('gtag(');

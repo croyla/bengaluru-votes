@@ -61,7 +61,7 @@ No Redis, no queue, no separate API service. Nothing the platform serves lives o
 nginx `proxy_cache` on anonymous-shaped GET HTML (`deploy/nginx/conf.d/site.conf`):
 
 - Public pages: **60 s TTL**. `/media/`: 30 days. `/api/*`, `/curator/*`, `/admin/*`, `/transcribe/*`, `/login`: never cached. Issue-vote results are fetched from an uncached API only after the browser has voted.
-- **Invariant: public page HTML never varies by session.** A signed-in staff member receives the same cached anonymous markup; anything per-visitor comes from an uncached API (`GET /api/me`, `GET /api/issue-votes` with its opaque HttpOnly receipt cookie). **nginx strips the `Cookie` header** before proxying public routes and ignores upstream `Set-Cookie`, so only uncached APIs see a cookie. Each URL has exactly one cached variant per language. Guarded by `tests/routes/cache-invariant.test.ts`.
+- **Invariant: public page HTML never varies by session.** A signed-in staff member receives the same cached anonymous markup; anything per-visitor comes from an uncached API (`GET /api/issue-votes` with its opaque HttpOnly receipt cookie). **nginx strips the `Cookie` header** before proxying public routes and ignores upstream `Set-Cookie`, so only uncached APIs see a cookie. Each URL has exactly one cached variant per language. Guarded by `tests/routes/cache-invariant.test.ts`.
 - **The cache key ignores the query string** (`$scheme$host$uri`) — unknown params can neither fragment the cache nor bust it into a DoS on the origin.
 - Worst-case origin load is every public URL rendered once per TTL — about 4,000 renders/minute at the ceiling (369 wards × ~5 pages × 2 languages), well within one Node process. The spike lands on nginx.
 - The 60 s window satisfies "edits go live immediately"; staff preview on uncached staff routes.
@@ -81,7 +81,7 @@ Schema: `src/db/schema.ts`; migrations: `drizzle/`. Tables kept only for dormant
 | Candidates | `candidates` (slug, ward, lifecycle `filed\|contesting\|rejected\|withdrawn`; English name/party columns are a search projection) · `candidate_fields` (below) |
 | Affidavits | `media` (bytes, validated content type, sha256, size) · `candidate_affidavits` (the extraction queue, below) · `transcription_assignments` |
 | Citizen contributions | `anonymous_issue_vote_sets` / `anonymous_issue_vote_selections` · `flag_items` / `flag_submissions` / `flag_admissions` / `flag_request_buckets` / `flag_metrics` |
-| Staff | `users` (role `citizen\|transcriber\|curator\|admin`, status `active\|banned\|erased`) · `sessions` |
+| Staff | `users` (staff only: role `transcriber\|curator\|admin`, status `active\|banned\|erased`, email, language) · `sessions` |
 | Operations | `app_settings` (election anchors, `low_confidence_threshold`, guide link-out URLs) · `geocode_cache` (normalized address → ward id only; null = out of coverage) · `budget_counters` (per-day counters: `geocode`, `epic_lookup`, `anonymous_vote`, …) |
 
 Seeds: `npm run seed:wards` loads `data/gba.geojson` (369 wards), `data/ward-facts.json`, `data/city-issues.json` and `data/ward-candidate-questions.json`; `npm run seed:admin` creates the first admin.
@@ -117,7 +117,6 @@ Public endpoints:
 |---|---|
 | `POST /api/ward-lookup` | `{lat, lng}` (device location) → point-in-polygon → ward: no external call, no budget, nothing stored. `{address}` → server-side Google geocode → point-in-polygon → ward. Returns a ward or `out_of_coverage`/`ambiguous`/`unavailable`, **never coordinates** (`src/lib/geocode.ts`; a privacy rule — `geocode_cache` has never held a location). Daily budget `GEOCODE_DAILY_BUDGET` (default 2,000) stops address mode when exhausted |
 | `POST /api/booth-lookup` | `{epic}` → BBMP electoral API `searchby-epic` (`src/lib/electoral-api.ts`, custom transport in `electoral-transport.ts` because upstream serves an incomplete TLS chain) → booth, voter name and our ward (`src/lib/booth-lookup.ts`, mapped via `electoral-wards.ts` with a point-in-polygon fallback). Name and EPIC are never logged, cached or stored; `no-store`. Daily cap `EPIC_DAILY_BUDGET` (default 5,000) |
-| `GET /api/me` | Session state for client-side personalization |
 | `POST /api/flags/identity` | Issues the signed 30-day HttpOnly `bv_flag_browser` receipt (SameSite=Strict). Never set on a page GET or in middleware |
 | `POST /api/flags` | Anonymous candidate-field report (rules below) |
 | `PUT /api/issue-votes` | Anonymous exactly-three ballot: reCAPTCHA action + score, receipt uniqueness, per-IP nginx `vote` zone, 8 KB body, strict payload, global daily circuit breaker (`ANONYMOUS_VOTE_DAILY_BUDGET`, default 50,000) |
@@ -125,9 +124,9 @@ Public endpoints:
 | `GET /ward/{id}/boundary.json` | One ward's GeoJSON Feature; cached public route (§5) |
 | `GET /media/{id}/{hash}` | Affidavit PDFs from Postgres at an immutable URL, long-TTL cached (§5); `Content-Type` from the validated stored type (§13). Frameable by this site's own pages only |
 
-Endpoints that exist only for dormant code (`/api/otp/*`, `/api/webhooks/*`, `/api/eoi`) are listed in §15.
+The one endpoint that exists only for dormant code (`/api/eoi`) is listed in §15.
 
-**Anonymous candidate reports.** Any visitor can report an error in one of the eight flaggable fields; the modal opens directly, with no sign-in. The app bounds the body at 32 KiB (nginx too), validates the target and source link, verifies reCAPTCHA (action `candidate_flag`, hostname, score ≥ 0.5 by default, provider errors fail closed in production), then deduplicates and checks allowances in one Postgres transaction under target and reporter advisory locks (`src/lib/flags.ts`, `src/lib/flag-abuse.ts`). Defaults: 3 accepted reports per 10 minutes and 10 per 24 hours per browser and per account (`FLAGS_REPORTER_BURST_LIMIT`, `FLAGS_REPORTER_DAILY_LIMIT`), 100 per 24 hours per network (`FLAGS_NETWORK_DAILY_LIMIT`); nginx `flags` zone 10 requests/minute/IP, burst 5. `FLAGS_ABUSE_SECRET` keys the browser and network hashes; with `FLAGS_TRUST_PROXY=true` the app trusts only nginx's overwritten `X-Flag-Client-IP` (`src/lib/flag-http.ts`). An exact repeat of a report resolved within seven days on an unchanged value is acknowledged without attaching a new reporter. Reports and counts stay private and never change data automatically; counts are not identities. `FLAGS_SUBMISSIONS_PAUSED=true` refuses new submissions during an attack. `jobs/flag-cleanup.ts` expires abuse metadata daily, independently of `RETENTION_ENABLED`.
+**Anonymous candidate reports.** Any visitor can report an error in one of the eight flaggable fields; the modal opens directly, with no sign-in. The app bounds the body at 32 KiB (nginx too), validates the target and source link, verifies reCAPTCHA (action `candidate_flag`, hostname, score ≥ 0.5 by default, provider errors fail closed in production), then deduplicates and checks allowances in one Postgres transaction under target and reporter advisory locks (`src/lib/flags.ts`, `src/lib/flag-abuse.ts`). Reports are anonymous only: no submission is linked to an account, even a signed-in staff member's. Defaults: 3 accepted reports per 10 minutes and 10 per 24 hours per browser (`FLAGS_REPORTER_BURST_LIMIT`, `FLAGS_REPORTER_DAILY_LIMIT`), 100 per 24 hours per network (`FLAGS_NETWORK_DAILY_LIMIT`); nginx `flags` zone 10 requests/minute/IP, burst 5. `FLAGS_ABUSE_SECRET` keys the browser and network hashes; with `FLAGS_TRUST_PROXY=true` the app trusts only nginx's overwritten `X-Flag-Client-IP` (`src/lib/flag-http.ts`). An exact repeat of a report resolved within seven days on an unchanged value is acknowledged without attaching a new reporter. Reports and counts stay private and never change data automatically; counts are not identities. `FLAGS_SUBMISSIONS_PAUSED=true` refuses new submissions during an attack. `jobs/flag-cleanup.ts` expires abuse metadata daily.
 
 **Curator screens** (`/curator/*`, curator or admin). `/curator` is the dashboard with search by candidate name or ward. `/curator/queue` and `/curator/queue/{id}` are the flag queue: the stored affidavit beside a fix form; curators can fix, reject, or mark selected submissions as spam (other active submissions keep the item open; an item with no active submission closes as rejected). Queue pages hold 50 items, submission pages 20. `/curator/candidate/{id}` is the candidate editor, `/curator/candidate/new?ward={id}` creates one, `/curator/ward/{id}` lists a ward's candidates, `/curator/ward/{id}/issues` edits ward issues, `/curator/matching` and `/curator/matching/{id}` are the needs-matching list (pick the ward, confirm name and party). `/curator/guide` is onboarding.
 
@@ -135,11 +134,13 @@ Endpoints that exist only for dormant code (`/api/otp/*`, `/api/webhooks/*`, `/a
 
 **Transcription screens** (form-posting pages, desktop only). `POST /transcribe` (action `start`) assigns the next affidavit in priority order (§6) and redirects to `/transcribe/{assignment-id}`; there, `save` publishes the confirmed form in one transaction, `release` gives it back, `report` sends it to the matching list with a note. `/transcribe/guide` is onboarding. Middleware admits transcribers and admins; beyond that, authorization is "an open, unexpired assignment with this id belongs to this caller", checked on every read and write — anything else is a 404, for an admin too. These are the platform's only assignment-scoped writes.
 
-**Admin screens** (`/admin/*`, admin only). `/admin` shows console counts and flag-abuse counters (accepted, duplicates, CAPTCHA failures, rate-limit refusals, spam, backlog and oldest age, volume-spike warning). `/admin/affidavits`: bulk upload, counts by state, needs-matching list, failed list with retry and discard. `/admin/users`: staff list, role changes, ban/reactivate and the erasure routine (`src/lib/erasure.ts`: deletes OTP and session rows, nulls contact and consent fields, leaves an opaque `erased` tombstone so contributions keep referential integrity). `/admin/roles` redirects to `/admin/users`.
+**Admin screens** (`/admin/*`, admin only). `/admin` shows console counts and flag-abuse counters (accepted, duplicates, CAPTCHA failures, rate-limit refusals, spam, backlog and oldest age, volume-spike warning). `/admin/affidavits`: bulk upload, counts by state, needs-matching list, failed list with retry and discard. `/admin/users`: the staff list (every account is staff), role changes, ban/reactivate, removing staff access and the erasure routine (`src/lib/erasure.ts`: deletes session rows, nulls the email, leaves an opaque `erased` tombstone so staff work keeps referential integrity). Removing staff access deletes the account, or erases it when a transcription assignment still points at it (`src/lib/admin.ts#revokeRole`). `/admin/roles` redirects to `/admin/users`.
 
 **Uploads.** Admin-only. nginx `client_max_body_size 256m` on staff routes (a batch of PDFs); re-checked app-side per file, **affidavit PDFs ≤ 20 MB**. Type is validated by magic bytes against an allowlist (§13) before the bytes are persisted; extension and client MIME type are ignored.
 
 **No role is ward-scoped.** `src/middleware.ts` admits curator and admin routes by role alone and transcriber writes by assignment ownership.
+
+**Staff sign-in** is one shared password: `/login` takes an existing active staff account's email plus `MASTER_PASSWORD` (`src/lib/master-login.ts`; at least 16 characters, checked on every request). With it unset nobody can sign in. There is no OTP, email or WhatsApp sign-in, and no citizen accounts: the `role` enum is `transcriber | curator | admin`.
 
 **Sessions** are signed cookies, `HttpOnly; Secure; SameSite=Lax`, with a sliding **1-hour idle timeout for every role** (`src/lib/session.ts`). The `/login` return target is validated as a same-origin relative path. One middleware enforces roles, rejects unsafe methods that fail an `Origin`/`Sec-Fetch-Site` same-origin check, and requires a synchronizer CSRF token on staff form routes (§13).
 
@@ -152,7 +153,7 @@ Endpoints that exist only for dormant code (`/api/otp/*`, `/api/webhooks/*`, `/a
 - Complete HTML at first byte for all public content.
 - **JSON-LD** per page type (`src/lib/seo.ts`): `Person` (candidates), `AdministrativeArea` (wards), `Event` (the election, on `/about-election`, when `election_date` is set), `Organization` (Oorvani, on `/about`), `BreadcrumbList`. Voter questions are consolidated on `/voter-faqs`, which emits no `FAQPage`.
 - Per-language **sitemaps** with `lastmod` from publish timestamps, regenerated hourly by `jobs` (see the serving gap in §16); `robots.txt`; canonical URLs; `llms.txt`.
-- `noindex` (`X-Robots-Tag`, `src/middleware.ts`) and sitemap exclusion: `/curator/*`, `/admin/*`, `/transcribe/*`, `/login`, and the dormant `/account/*` and `/partner/*`.
+- `noindex` (`X-Robots-Tag`, `src/middleware.ts`) and sitemap exclusion: `/curator/*`, `/admin/*`, `/transcribe/*`, `/login`, and the dormant `/partner/*`.
 - **Open Graph tags on every page** in that page's language — distribution is WhatsApp forwarding.
 - AEO: a concise factual summary at the top of ward/candidate/guide pages; question-shaped headings; facts in visible text.
 - Candidate routes before data lands return **200 with the empty state**, so shared URLs accumulate authority. Withdrawn and rejected candidates stay **200 with a status banner**; only unknown slugs 404.
@@ -194,8 +195,6 @@ Never machine-translated: official bilingual data (ward names) and UI strings.
 | hourly | `jobs/regen-sitemaps.ts` |
 | 02:00 | `scripts/backup.sh` — fails nightly by design (below) |
 | 06:15 | `jobs/flag-cleanup.ts` — expires flag-abuse metadata |
-
-`deploy/crontab` also schedules three dormant jobs (`run-campaign`, `reconcile-suppressions`, `retention`); see §15.
 
 - **Logs:** structured JSON to stdout (pino, `src/lib/logger.ts`), Compose `json-file` driver capped at 10 MB × 5 files per service. `/healthz` backs the nginx container healthcheck.
 - **Monitoring: none external.** No uptime check, no SSL-expiry alert, no disk alert, no error reporting, and the geocode/EPIC/vote budgets only refuse — they alarm nobody. A silently failed certbot renewal surfaces as an outage on expiry day; the daily `nginx -s reload` (§14.5) picks up *successful* renewals only. Nothing watches disk; exhaustion taking Postgres down mid-spike is a live risk.
@@ -323,24 +322,15 @@ The VPS is already paid for. Backups and monitoring cost nothing because neither
 
 ## 15. Dormant code slated for removal
 
-Citizen registration and email/WhatsApp messaging are dropped; citizens are anonymous. The code below is still in the repo and must not be treated as a feature. Each item is a removal candidate.
+Citizen registration, citizen accounts, OTP sign-in, email/WhatsApp messaging and Sentry were removed in full (code, jobs, tables and columns: migration `0016`). The code below is still in the repo and must not be treated as a feature. Each item is a removal candidate.
 
 | Leftover | Paths | Why it is dormant, and the live risk |
 |---|---|---|
-| Campaign sends | `jobs/run-campaign.ts`, `src/lib/send/` (`calendar.ts`, `send.ts`, `sendgrid.ts`, `twilio.ts`, `render.ts`, `templates.ts`); `campaign_sends` | **Still scheduled** in `deploy/crontab` (03:30). Its audience is every active `users` row with a home ward, whatever the role, so setting `SENDGRID_API_KEY` or Twilio credentials would message real people. `SENDS_DISABLED` (`src/lib/send/send.ts`) only guards the local stack. Remove the cron line first |
-| Suppression reconciliation and webhooks | `jobs/reconcile-suppressions.ts` (cron 05:00; no-op without `SENDGRID_API_KEY`), `src/pages/api/webhooks/sendgrid.ts`, `src/pages/api/webhooks/twilio.ts`, `src/lib/suppressions.ts`; `suppressions`; nginx `webhook` zone | Nothing sends, so nothing bounces |
-| Retention job | `jobs/retention.ts` (cron 06:00) | Erases nobody unless `RETENTION_ENABLED=true`; the contact data it targets is no longer collected |
-| Registration and OTP | `src/pages/api/otp/request.ts`, `src/pages/api/otp/verify.ts`, `src/lib/otp.ts`, `src/lib/auth-flow.ts` (incl. the W1 welcome send), `src/components/RegisterLoginModal.astro`, `src/islands/RegisterLoginModal.ts`, register-for-updates slots in `src/features/pages/Ward.astro`, `WardCandidates.astro`, `Compare.astro`; `otp_codes`, `otp_test_codes`; nginx `otp` zone | Hidden only by a conditional on the current staff sign-in mode (in `src/layouts/Base.astro`, the three pages above, and `src/middleware.ts`, which 404s `/api/otp/*`). **If staff sign-in changes without removing this code, the Register/Login modal, register slots and OTP endpoints become reachable again** |
-| Citizen account pages | `src/pages/account/` and `src/pages/kn/account/` (`index`, `notifications`, `submissions`), `src/features/pages/Account*.astro`, `src/lib/account-flow.ts`, `src/islands/MeSlot.ts` (register/updates swaps) | No citizen accounts exist |
-| Citizen contact/consent columns | `users.phone`, `home_ward_id`, `language`, `src_attribution`, `consent_at`, `consent_version`, `future_tools_opt_in`, `email_enabled`, `whatsapp_enabled`; `app_settings.consent_wording_version` | Written only by registration |
-| Account-linked voting | `issue_vote_sets`, `issue_vote_selections`, `src/lib/votes.ts` | Superseded by anonymous voting (§6) |
-| Partner and EOI | `src/pages/partner/[slug].astro`, `src/pages/kn/partner/[slug].astro`, `src/features/pages/PartnerKit.astro`, `src/pages/admin/partners.astro`, `src/lib/partners.ts`, `src/lib/attribution.ts` (the `?src` cookie writer in `Base.astro`, read only by OTP registration), `src/pages/api/eoi.ts`; `partners`, `partner_wards`, `eoi_submissions` | No public EOI form; attribution has no reader once registration is gone. `/partner/{slug}` still renders (noindex) |
-| Sentry | `src/lib/logger.ts` (`@sentry/node`, `captureException` calls in middleware and jobs) | Inert without `SENTRY_DSN`; Sentry is not used |
+| Partner and EOI | `src/pages/partner/[slug].astro`, `src/pages/kn/partner/[slug].astro`, `src/features/pages/PartnerKit.astro`, `src/pages/admin/partners.astro`, `src/lib/partners.ts`, `src/lib/attribution.ts` (the `?src` cookie writer in `Base.astro`, which nothing reads), `src/pages/api/eoi.ts`; `partners`, `partner_wards`, `eoi_submissions` | No public EOI form; attribution has no reader. `/partner/{slug}` still renders (noindex) |
 | EC-link affidavit fetch | `src/lib/affidavit-fetch.ts` (`fetchAffidavitFromEc`, SSRF-hardened) | No caller outside `tests/unit/affidavit-fetch.test.ts` |
-| Per-account rate limiter | `src/lib/rate-limit.ts` | No caller |
 | Candidate stances and photos | `candidate_stances`, `publishStance` in `src/lib/publish.ts`; `candidates.photo_media_id`, legacy `name_kn`/`party_kn` | No editor writes them; pages render a photo only if one was stored |
 | Orphan pages | `src/features/pages/HowToVote.astro`, `VoterId.astro`, `FindBooth.astro` | Not routed; `/voter-faqs` and the home-page booth card replace them |
-| Unused tables and enum values | `booths` (booth lookup uses the BBMP API); `budget_kind` `news_query`, `otp_send` | No reader |
+| Unused table | `booths` (booth lookup uses the BBMP API) | No reader |
 
 ## 16. External dependencies & known gaps
 

@@ -6,11 +6,10 @@
  * `.code` onto itself — the original `postgres` package error (with its
  * `.code`) is only reachable via `.cause`. Any catch site that needs to
  * distinguish a specific Postgres error code must therefore check both
- * shapes, or it will silently miss the wrapped case (Task 29 review: this
- * exact gap left src/lib/auth-flow.ts's registration race undetected).
+ * shapes, or it will silently miss the wrapped case.
  */
 
-/** Postgres SQLSTATE for a unique-index violation (e.g. users.email/users.phone — one account per contact). */
+/** Postgres SQLSTATE for a unique-index violation (e.g. users.email — one account per address). */
 export const PG_UNIQUE_VIOLATION = '23505';
 
 /** True if `err` is a (possibly Drizzle-wrapped) Postgres unique-violation error. */

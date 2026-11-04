@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync } from 'node:fs';
 import { experimental_AstroContainer as AstroContainer } from 'astro/container';
 import Base from '../../src/layouts/Base.astro';
 import {
@@ -126,16 +125,6 @@ describe('?src attribution cookie writer (architecture.md §5/§13)', () => {
     });
   });
 
-  describe('cookie name matches the registration read', () => {
-    it('src/pages/api/otp/verify.ts reads the SAME cookie name this module writes', () => {
-      const verifySource = readFileSync(
-        new URL('../../src/pages/api/otp/verify.ts', import.meta.url),
-        'utf-8'
-      );
-      expect(verifySource).toContain(`cookies.get('${SRC_COOKIE_NAME}')`);
-    });
-  });
-
   describe('Base.astro output', () => {
     let htmlWithSrc: string;
     let htmlWithoutSrc: string;
@@ -161,7 +150,7 @@ describe('?src attribution cookie writer (architecture.md §5/§13)', () => {
 
     it('has no un-nonced inline script (every literal <script ...> tag on the page carries a nonce attribute, GA slot aside)', () => {
       // Every *inline* (is:inline / literal-content) script tag must carry a
-      // nonce. Astro's own module-script bundling (the MeSlot mount below)
+      // nonce. Astro's own module-script bundling (the island mounts)
       // is out of scope here — it is not one of the "two allowed inline
       // scripts" this task is about, and its src-attribute/module form is
       // covered by layout.test.ts.

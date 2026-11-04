@@ -28,7 +28,7 @@ export const client = postgres(process.env.DATABASE_URL, { max: 1 });
 export const db = drizzle(client, { schema });
 export { schema };
 
-export type Role = 'citizen' | 'transcriber' | 'curator' | 'admin';
+export type Role = 'transcriber' | 'curator' | 'admin';
 export type Auth = { userId: number; cookieValue: string; token: string };
 export interface WardFixture { id: number; nameEn: string; nameKn: string; corporation: 'south'; zone: string; boundaryRef: string }
 
@@ -84,7 +84,7 @@ export class Fixtures {
     return { mediaId: m.id, sha256, pdfUrl: `/media/${m.id}/${sha256.slice(0, 16)}` };
   }
 
-  /** A candidate with a published, AI-read affidavit: what a citizen flags. */
+  /** A candidate with a published, AI-read affidavit: what a reader flags. */
   async candidateWithAffidavit(wardId: number) {
     const e = extraction(wardId);
     const { mediaId, sha256, pdfUrl } = await this.pdf();

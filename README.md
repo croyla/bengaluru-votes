@@ -51,7 +51,7 @@ A small trusted team keeps the data accurate:
 - **Postgres** through **Drizzle** with forward-only SQL migrations.
 - **nginx** for TLS, rate limiting and a micro-cache in front of anonymous pages.
 - **Background containers**: a cron `jobs` container and an affidavit extraction worker.
-- **Claude** (Anthropic API) for affidavit field extraction and Kannada translation, the **Google Maps Platform** for geocoding, ward maps and address autocomplete, and **Twilio/SendGrid** for messaging.
+- **Claude** (Anthropic API) for affidavit field extraction and Kannada translation, the **Google Maps Platform** for geocoding, ward maps and address autocomplete, and **reCAPTCHA** on anonymous votes and reports.
 - Runs as one Docker Compose stack on a single VPS in Mumbai.
 
 The full design is in [`docs/architecture.md`](docs/architecture.md).

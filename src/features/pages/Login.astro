@@ -1,38 +1,24 @@
 ---
 /**
- * `/login` (`/kn/login`).
+ * `/login` (`/kn/login`) — staff sign-in. Citizens never sign in.
  *
- * The NO-JS / deep-link fallback for the Register/Login modal
- * (src/islands/RegisterLoginModal.ts) — a real server-rendered multi-step
- * `<form>` doing the SAME flow with standard POSTs. Purely presentational:
- * all step-dispatch/account-resolution logic lives in
- * src/lib/login-flow.ts (`handleLoginPost`/`initialLoginState`), called by
- * the route twins (src/pages/login.astro, src/pages/kn/login.astro) — a
- * redirect on success can only happen at the page level (see
- * src/pages/ward/[id].astro's header comment for why), so this component
- * never attempts one; it only ever renders one of the three steps.
+ * One server-rendered email + password form, posted with a standard POST.
+ * Purely presentational: the POST is handled by src/lib/login-flow.ts
+ * (`handleLoginPost`), called by the route twins (src/pages/login.astro,
+ * src/pages/kn/login.astro) — a redirect on success can only happen at the
+ * page level (see src/pages/ward/[id].astro's header comment for why).
  *
- * Each step's `<form>` carries the values the NEXT step needs as hidden
- * fields — `next` (already validated same-origin-relative), and for step 2
- * `destination`/`channel`, and for step 3 those plus the OTP `code` itself
- * (reused per `resolveOrRegister`'s peek-then-consume contract,
- * src/lib/auth-flow.ts) — so the flow survives a fully stateless
- * request/response cycle with no session yet to lean on.
- *
- * Step 3 has NO separate "I am 18 or older" checkbox and no separate
- * consent checkbox: registering is itself the consent act, and
- * the required 18+ assertion is part of the consent SENTENCE, not a
- * checkbox. The ONE checkbox on this page is the optional,
- * unchecked-by-default "future civic tools" opt-in.
+ * The password is the shared `MASTER_PASSWORD` (src/lib/master-login.ts).
+ * With it unset the form still renders, and every attempt fails with the
+ * same generic error.
  *
  * noindex: true belt-and-braces (src/middleware.ts already sends
  * X-Robots-Tag: noindex for every /login response).
  */
 import Base from '../../layouts/Base.astro';
-import FormField from '../../components/FormField.astro';
 import Button from '../../components/Button.astro';
 import Banner from '../../components/Banner.astro';
-import { t, localePath, type Lang } from '../../i18n';
+import { t, type Lang } from '../../i18n';
 import type { LoginRenderState } from '../../lib/login-flow';
 
 interface Props {
@@ -42,19 +28,17 @@ interface Props {
 
 const { lang, state } = Astro.props;
 const errorText = state.error ? t(lang, state.error) : undefined;
-// TEMPORARY (until email works for OTP): one email-or-phone + password form.
-const passwordMode = state.passwordMode === true;
 ---
 
 <Base
   lang={lang}
-  title={t(lang, passwordMode ? 'auth.password.meta.title' : 'auth.meta.title')}
-  description={t(lang, passwordMode ? 'auth.password.meta.description' : 'auth.meta.description')}
+  title={t(lang, 'auth.password.meta.title')}
+  description={t(lang, 'auth.password.meta.description')}
   path="/login"
   noindex={true}
 >
   <div class="login-page">
-    <h1>{t(lang, passwordMode ? 'auth.password.heading' : 'auth.modal.title')}</h1>
+    <h1>{t(lang, 'auth.password.heading')}</h1>
 
     {
       errorText && (
@@ -66,131 +50,39 @@ const passwordMode = state.passwordMode === true;
       )
     }
 
-    {
-      passwordMode && (
-        <form method="post" novalidate>
-          <input type="hidden" name="next" value={state.next} />
-          <div class="form-field">
-            <label class="form-label" for="login-destination">
-              {t(lang, 'auth.password.contactLabel')}
-            </label>
-            <input
-              id="login-destination"
-              class="form-input"
-              name="destination"
-              type="text"
-              autocomplete="username"
-              value={state.destination ?? ''}
-              required
-            />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="login-password">
-              {t(lang, 'auth.password.passwordLabel')}
-            </label>
-            <input
-              id="login-password"
-              class="form-input"
-              name="password"
-              type="password"
-              autocomplete="current-password"
-              required
-            />
-          </div>
-          <Button type="submit" variant="primary" lang={lang}>
-            {t(lang, 'auth.password.submit')}
-          </Button>
-        </form>
-      )
-    }
-
-    {
-      !passwordMode && state.step === 1 && (
-        <form method="post" novalidate>
-          <input type="hidden" name="step" value="1" />
-          <input type="hidden" name="next" value={state.next} />
-          <FormField label={t(lang, 'auth.step1.contactLabel')} name="destination" type="text" required lang={lang} />
-          <p class="helper">{t(lang, 'auth.step1.helper')}</p>
-          <Button type="submit" variant="primary" lang={lang}>
-            {t(lang, 'auth.step1.submit')}
-          </Button>
-        </form>
-      )
-    }
-
-    {
-      !passwordMode && state.step === 2 && (
-        <form method="post" novalidate>
-          <input type="hidden" name="step" value="2" />
-          <input type="hidden" name="next" value={state.next} />
-          <input type="hidden" name="destination" value={state.destination} />
-          <input type="hidden" name="channel" value={state.channel} />
-          <p>{t(lang, 'auth.step1.sent')}</p>
-          <div class="form-field">
-            <label class="form-label" for="login-code">
-              {t(lang, 'auth.step2.codeLabel')}
-            </label>
-            <input
-              id="login-code"
-              class="form-input"
-              name="code"
-              type="text"
-              inputmode="numeric"
-              autocomplete="one-time-code"
-              maxlength="6"
-              required
-            />
-          </div>
-          <Button type="submit" variant="primary" lang={lang}>
-            {t(lang, 'auth.step2.submit')}
-          </Button>
-        </form>
-      )
-    }
-
-    {
-      !passwordMode && state.step === 3 && (
-        <form method="post" novalidate>
-          <input type="hidden" name="step" value="3" />
-          <input type="hidden" name="next" value={state.next} />
-          <input type="hidden" name="destination" value={state.destination} />
-          <input type="hidden" name="channel" value={state.channel} />
-          <input type="hidden" name="code" value={state.code} />
-          <div class="form-field">
-            <label class="form-label" for="login-ward">
-              {t(lang, 'auth.step3.wardLabel')}
-            </label>
-            <input id="login-ward" class="form-input" name="wardId" type="number" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="login-language">
-              {t(lang, 'auth.step3.languageLabel')}
-            </label>
-            <select id="login-language" class="form-input" name="language">
-              <option value="en">{t(lang, 'auth.step3.languageOption.en')}</option>
-              <option value="kn">{t(lang, 'auth.step3.languageOption.kn')}</option>
-            </select>
-          </div>
-          <p class="consent">
-            {t(lang, 'auth.step3.consentSentence')}{' '}
-            <a href={localePath(lang, '/terms')} target="_blank" rel="noopener noreferrer">
-              {t(lang, 'auth.step3.termsLink')}
-            </a>
-            {' · '}
-            <a href={localePath(lang, '/privacy')} target="_blank" rel="noopener noreferrer">
-              {t(lang, 'auth.step3.privacyLink')}
-            </a>
-          </p>
-          <label class="checkbox">
-            <input type="checkbox" name="futureTools" />
-            {t(lang, 'auth.step3.futureTools')}
-          </label>
-          <Button type="submit" variant="primary" lang={lang}>
-            {t(lang, 'auth.step3.submit')}
-          </Button>
-        </form>
-      )
-    }
+    <form method="post" novalidate>
+      <input type="hidden" name="next" value={state.next} />
+      <div class="form-field">
+        <label class="form-label" for="login-destination">
+          {t(lang, 'auth.password.contactLabel')}
+        </label>
+        <input
+          id="login-destination"
+          class="form-input"
+          name="destination"
+          type="text"
+          autocomplete="username"
+          value={state.destination ?? ''}
+          required
+        />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="login-password">
+          {t(lang, 'auth.password.passwordLabel')}
+        </label>
+        <input
+          id="login-password"
+          class="form-input"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
+      </div>
+      <Button type="submit" variant="primary" lang={lang}>
+        {t(lang, 'auth.password.submit')}
+      </Button>
+    </form>
   </div>
 </Base>
 

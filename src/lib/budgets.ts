@@ -1,8 +1,7 @@
 /**
  * Shared daily-budget counter (architecture.md §13 "cost amplification";
  * §16 for the geocoding row). Reused by
- * geocoding (this task), OTP sending (Task 25), and news-link suggestion
- * queries (Task 55) — one counter mechanism, one enum of kinds
+ * geocoding, BBMP EPIC lookups and anonymous issue votes — one counter mechanism, one enum of kinds
  * (`budget_kind` in src/db/schema.ts), keyed by (UTC day, kind).
  *
  * Atomicity: `consumeBudget` is a single `INSERT ... ON CONFLICT DO UPDATE
@@ -26,7 +25,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client';
 import { budgetCounters } from '../db/schema';
 
-export type BudgetKind = 'geocode' | 'otp_send' | 'news_query' | 'epic_lookup' | 'anonymous_vote';
+export type BudgetKind = 'geocode' | 'epic_lookup' | 'anonymous_vote';
 
 /** UTC calendar date as 'YYYY-MM-DD', matching the `date` (string-mode) column. */
 function todayUtc(): string {

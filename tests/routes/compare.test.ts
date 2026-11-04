@@ -85,7 +85,7 @@ function escAmp(s: string): string {
   return s.replace(/&/g, '&amp;');
 }
 
-/** Scopes an assertion to just the <table class="compare-table">…</table> markup, so a check for e.g. "no error-ish class" isn't tripped up by Base.astro's globally-mounted Flag/Vote/RegisterLogin modals (which legitimately use a `form-error` class elsewhere on the page). */
+/** Scopes an assertion to just the <table class="compare-table">…</table> markup, so a check for e.g. "no error-ish class" isn't tripped up by Base.astro's globally-mounted Flag/Vote modals (which legitimately use a `form-error` class elsewhere on the page). */
 function extractTable(html: string): string {
   const start = html.indexOf('<table class="compare-table">');
   const end = html.indexOf('</table>', start) + '</table>'.length;
@@ -406,24 +406,19 @@ describe('Candidate comparison (/ward/{id}/compare)', () => {
       }
     });
 
-    it('empty state links back to the ward and offers the register prompt', async () => {
+    it('empty state links back to the ward and offers no register-for-updates prompt', async () => {
       const html = normalize(await (await renderCompare('en', EMPTY_WARD.id)).text());
       expect(html).toContain(`href="${localePath('en', `/ward/${EMPTY_WARD.id}`)}"`);
-      expect(html).toContain(t('en', 'common.registerForUpdates'));
+      expect(html).not.toContain('data-register-slot');
     });
   });
 
-  it('temporary password mode: renders no register slot', async () => {
-    process.env.MASTER_PASSWORD = 'slot-test-master-password-0001';
-    try {
-      const res = await renderCompare('en', WARD.id);
-      const html = normalize(await res.text());
-      expect(res.status).toBe(200);
-      expect(html).not.toContain('data-register-slot');
-      expect(html).not.toContain('data-register-login-modal');
-    } finally {
-      delete process.env.MASTER_PASSWORD;
-    }
+  it('renders no register slot and no Register/Login modal', async () => {
+    const res = await renderCompare('en', WARD.id);
+    const html = normalize(await res.text());
+    expect(res.status).toBe(200);
+    expect(html).not.toContain('data-register-slot');
+    expect(html).not.toContain('data-register-login-modal');
   });
 
   describe('unknown ward id -> real 404 (route twin)', () => {

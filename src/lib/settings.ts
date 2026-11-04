@@ -26,7 +26,6 @@ export const SETTING_KEYS = [
   'roll_deadline',
   'scrutiny_complete_date',
   'withdrawals_closed',
-  'consent_wording_version',
   'data_page_live',
   'results_declared_at',
   // Task 21 guide pages' guided link-out URLs —

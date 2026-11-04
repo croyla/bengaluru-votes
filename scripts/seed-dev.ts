@@ -44,7 +44,6 @@ const LEGACY_FICTIONAL_PDF = Buffer.from(
   'utf8',
 );
 
-export const DEMO_CITIZEN_EMAIL = 'demo-citizen-fictional@example.com';
 
 /**
  * A one-page PDF that says `label`, so a waiting affidavit shows a page
@@ -296,18 +295,11 @@ export async function seedDev(db: Db): Promise<SeedDevResult> {
 }
 
 /**
- * Two pending flags from a fictional citizen on one candidate: one on the
- * declared assets (a field fix) and one on the ward (a ward move). A target
- * that already has a pending flag is left as it is.
+ * Two pending anonymous flags on one candidate: one on the declared assets
+ * (a field fix) and one on the ward (a ward move). A target that already
+ * has a pending flag is left as it is.
  */
 async function seedDemoFlags(db: Db, candidateId: number, wardId: number, otherWardId: number): Promise<number[]> {
-  await db
-    .insert(schema.users)
-    .values({ email: DEMO_CITIZEN_EMAIL, role: 'citizen', status: 'active' })
-    .onConflictDoNothing({ target: schema.users.email });
-  const [citizen] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, DEMO_CITIZEN_EMAIL));
-  if (!citizen) throw new Error('seed-dev: failed to seed the demo citizen');
-
   const flags = [
     {
       key: 'assets',
@@ -339,7 +331,6 @@ async function seedDemoFlags(db: Db, candidateId: number, wardId: number, otherW
     if (!item) throw new Error(`seed-dev: failed to seed a flag on ${targetRef}`);
     await db.insert(schema.flagSubmissions).values({
       flagItemId: item.id,
-      userId: citizen.id,
       detail: flag.detail,
       suggestedValue: flag.suggestedValue,
     });

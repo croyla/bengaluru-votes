@@ -34,18 +34,16 @@ const WARD = {
 };
 
 const EMAILS = {
-  citizen: 'middleware-citizen@example.com',
   transcriber: 'middleware-transcriber@example.com',
   curator: 'middleware-curator@example.com',
   admin: 'middleware-admin@example.com',
 };
 
-let citizenId: number;
 let transcriberId: number;
 let curatorId: number;
 let adminId: number;
 
-async function upsertUser(email: string, role: 'citizen' | 'transcriber' | 'curator' | 'admin'): Promise<number> {
+async function upsertUser(email: string, role: 'transcriber' | 'curator' | 'admin'): Promise<number> {
   const [row] = await db
     .insert(schema.users)
     .values({ email, role, status: 'active' })
@@ -62,14 +60,13 @@ beforeAll(async () => {
     .values(WARD)
     .onConflictDoNothing();
 
-  citizenId = await upsertUser(EMAILS.citizen, 'citizen');
   transcriberId = await upsertUser(EMAILS.transcriber, 'transcriber');
   curatorId = await upsertUser(EMAILS.curator, 'curator');
   adminId = await upsertUser(EMAILS.admin, 'admin');
 });
 
 afterAll(async () => {
-  const userIds = [citizenId, transcriberId, curatorId, adminId];
+  const userIds = [transcriberId, curatorId, adminId];
   await db.delete(schema.sessions).where(inArray(schema.sessions.userId, userIds));
   await db.delete(schema.users).where(inArray(schema.users.email, Object.values(EMAILS)));
   await client.end();
@@ -130,10 +127,10 @@ async function run(ctx: unknown, next: ReturnType<typeof nextStub>): Promise<Res
 
 describe('src/middleware.ts', () => {
   describe('Origin / Sec-Fetch-Site same-origin check on unsafe methods', () => {
-    it('cross-origin Origin header on POST /account/... -> 403', async () => {
+    it('cross-origin Origin header on POST /curator/... -> 403', async () => {
       const ctx = makeContext({
         method: 'POST',
-        path: '/account/notifications',
+        path: '/curator/queue/1',
         headers: { origin: 'https://evil.example' },
       });
       const res = await run(ctx, nextStub());
@@ -141,13 +138,13 @@ describe('src/middleware.ts', () => {
     });
 
     it('same-origin Origin header + valid session + valid csrf token -> passes through to next()', async () => {
-      const { id, cookieValue } = await sessionFor(citizenId);
+      const { id, cookieValue } = await sessionFor(curatorId);
       const token = issueCsrfToken(id);
       const next = nextStub(200);
 
       const ctx = makeContext({
         method: 'POST',
-        path: '/account/notifications',
+        path: '/curator/queue/1',
         headers: { origin: SITE_ORIGIN },
         cookieValue,
         contentType: 'application/x-www-form-urlencoded',
@@ -160,13 +157,13 @@ describe('src/middleware.ts', () => {
     });
 
     it('Sec-Fetch-Site: same-origin passes (no Origin header needed)', async () => {
-      const { id, cookieValue } = await sessionFor(citizenId);
+      const { id, cookieValue } = await sessionFor(curatorId);
       const token = issueCsrfToken(id);
       const next = nextStub(200);
 
       const ctx = makeContext({
         method: 'POST',
-        path: '/account/notifications',
+        path: '/curator/queue/1',
         headers: { 'sec-fetch-site': 'same-origin' },
         cookieValue,
         contentType: 'application/x-www-form-urlencoded',
@@ -181,7 +178,7 @@ describe('src/middleware.ts', () => {
     it('Sec-Fetch-Site: cross-site -> 403 even with a same-origin Origin header', async () => {
       const ctx = makeContext({
         method: 'POST',
-        path: '/account/notifications',
+        path: '/curator/queue/1',
         headers: { 'sec-fetch-site': 'cross-site', origin: SITE_ORIGIN },
       });
       const res = await run(ctx, nextStub());
@@ -189,18 +186,18 @@ describe('src/middleware.ts', () => {
     });
 
     it('neither Origin nor Sec-Fetch-Site present -> 403 (fail closed)', async () => {
-      const ctx = makeContext({ method: 'POST', path: '/account/notifications' });
+      const ctx = makeContext({ method: 'POST', path: '/curator/queue/1' });
       const res = await run(ctx, nextStub());
       expect(res.status).toBe(403);
     });
   });
 
   describe('route guards', () => {
-    it('unauthenticated GET /account/... -> redirect to /login?next=<validated relative path>', async () => {
-      const ctx = makeContext({ path: '/account/submissions?x=1' });
+    it('unauthenticated GET /curator/... -> redirect to /login?next=<validated relative path>', async () => {
+      const ctx = makeContext({ path: '/curator/queue?x=1' });
       const res = await run(ctx, nextStub());
       expect(res.status).toBe(302);
-      expect(res.headers.get('location')).toBe(`/login?next=${encodeURIComponent('/account/submissions?x=1')}`);
+      expect(res.headers.get('location')).toBe(`/login?next=${encodeURIComponent('/curator/queue?x=1')}`);
     });
 
     it('unauthenticated GET /curator -> redirect to /login', async () => {
@@ -208,22 +205,6 @@ describe('src/middleware.ts', () => {
       const res = await run(ctx, nextStub());
       expect(res.status).toBe(302);
       expect(res.headers.get('location')).toBe(`/login?next=${encodeURIComponent('/curator')}`);
-    });
-
-    it('citizen GET /curator -> 403', async () => {
-      const { cookieValue } = await sessionFor(citizenId);
-      const ctx = makeContext({ path: '/curator', cookieValue });
-      const res = await run(ctx, nextStub());
-      expect(res.status).toBe(403);
-    });
-
-    it('transcriber GET /account -> passes through', async () => {
-      const { cookieValue } = await sessionFor(transcriberId);
-      const next = nextStub();
-      const ctx = makeContext({ path: '/account', cookieValue });
-      const res = await run(ctx, next);
-      expect(res.status).toBe(200);
-      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it.each(['/curator', '/admin', '/admin/users'])('transcriber GET %s -> 403', async (path) => {
@@ -253,11 +234,6 @@ describe('src/middleware.ts', () => {
       const next = nextStub();
       expect((await run(makeContext({ path: '/transcribe', cookieValue }), next)).status).toBe(200);
       expect(next).toHaveBeenCalledTimes(1);
-    });
-
-    it('citizen GET /transcribe -> 403', async () => {
-      const { cookieValue } = await sessionFor(citizenId);
-      expect((await run(makeContext({ path: '/transcribe', cookieValue }), nextStub())).status).toBe(403);
     });
 
     it('curator GET /transcribe -> 403', async () => {
@@ -322,7 +298,7 @@ describe('src/middleware.ts', () => {
     });
 
     it('a same-origin relative path (with query) passes through unchanged', () => {
-      expect(isSameOriginRelative('/account/submissions?x=1')).toBe('/account/submissions?x=1');
+      expect(isSameOriginRelative('/curator/queue?x=1')).toBe('/curator/queue?x=1');
     });
 
     it('non-string / empty input collapses to /', () => {
@@ -351,7 +327,7 @@ describe('src/middleware.ts', () => {
       });
 
       it('a control char embedded mid-path also collapses to /', () => {
-        expect(isSameOriginRelative('/account/\tsubmissions')).toBe('/');
+        expect(isSameOriginRelative('/curator/\tqueue')).toBe('/');
       });
 
       it('documents that the consumer decodes %09 into a raw tab before calling this function', () => {
@@ -386,7 +362,7 @@ describe('src/middleware.ts', () => {
 
     describe('canonicalization preserves genuinely same-origin targets', () => {
       it('a same-origin relative path with a query string round-trips unchanged', () => {
-        expect(isSameOriginRelative('/account/submissions?x=1')).toBe('/account/submissions?x=1');
+        expect(isSameOriginRelative('/curator/queue?x=1')).toBe('/curator/queue?x=1');
       });
 
       it('a plain same-origin path round-trips unchanged', () => {
@@ -441,7 +417,7 @@ describe('src/middleware.ts', () => {
           '/\t/evil.example',
           '/\n/evil.example',
           '/\r/evil.example',
-          '/account/\tsubmissions',
+          '/curator/\tqueue',
           '/.//evil.example',
           '/..//evil.example',
           '/./..//evil.example',
@@ -472,11 +448,11 @@ describe('src/middleware.ts', () => {
   });
 
   describe('synchronizer CSRF token', () => {
-    it('/account POST without a valid token -> 403', async () => {
-      const { cookieValue } = await sessionFor(citizenId);
+    it('/curator POST without a valid token -> 403', async () => {
+      const { cookieValue } = await sessionFor(curatorId);
       const ctx = makeContext({
         method: 'POST',
-        path: '/account/notifications',
+        path: '/curator/queue/1',
         headers: { origin: SITE_ORIGIN },
         cookieValue,
         contentType: 'application/x-www-form-urlencoded',
@@ -486,11 +462,11 @@ describe('src/middleware.ts', () => {
       expect(res.status).toBe(403);
     });
 
-    it('/account POST with no token field at all -> 403', async () => {
-      const { cookieValue } = await sessionFor(citizenId);
+    it('/curator POST with no token field at all -> 403', async () => {
+      const { cookieValue } = await sessionFor(curatorId);
       const ctx = makeContext({
         method: 'POST',
-        path: '/account/notifications',
+        path: '/curator/queue/1',
         headers: { origin: SITE_ORIGIN },
         cookieValue,
         contentType: 'application/x-www-form-urlencoded',
@@ -500,12 +476,12 @@ describe('src/middleware.ts', () => {
       expect(res.status).toBe(403);
     });
 
-    it('/account POST with a valid issueCsrfToken(sessionId) -> passes the csrf check', async () => {
-      const { id, cookieValue } = await sessionFor(citizenId);
+    it('/curator POST with a valid issueCsrfToken(sessionId) -> passes the csrf check', async () => {
+      const { id, cookieValue } = await sessionFor(curatorId);
       const next = nextStub(200);
       const ctx = makeContext({
         method: 'POST',
-        path: '/account/notifications',
+        path: '/curator/queue/1',
         headers: { origin: SITE_ORIGIN },
         cookieValue,
         contentType: 'application/x-www-form-urlencoded',
@@ -516,13 +492,13 @@ describe('src/middleware.ts', () => {
       expect(res.status).toBe(200);
     });
 
-    it('/api/otp/request POST with a good Origin but no csrf field is NOT rejected by the CSRF rule', async () => {
+    it('/api/flags POST with a good Origin but no csrf field is NOT rejected by the CSRF rule', async () => {
       const next = nextStub(200);
       const ctx = makeContext({
         method: 'POST',
-        path: '/api/otp/request',
+        path: '/api/flags',
         headers: { origin: SITE_ORIGIN, 'content-type': 'application/json' },
-        body: JSON.stringify({ destination: 'x@example.com' }),
+        body: JSON.stringify({ detail: 'x' }),
         contentType: 'application/json',
       });
       const res = await run(ctx, next);
@@ -531,24 +507,24 @@ describe('src/middleware.ts', () => {
     });
   });
 
-  describe('/api/webhooks/* exemption', () => {
-    it('cross-origin POST with no Origin/Sec-Fetch-Site and no session is let through (not 403)', async () => {
+  describe('/api/* has no Origin-check exemption', () => {
+    it.each(['/api/flags', '/api/webhooks/sendgrid'])('POST %s with no Origin/Sec-Fetch-Site and no session -> 403, route never runs', async (path) => {
       const next = nextStub(200);
       const ctx = makeContext({
         method: 'POST',
-        path: '/api/webhooks/sendgrid',
+        path,
         body: JSON.stringify([{ event: 'bounce' }]),
         contentType: 'application/json',
       });
       const res = await run(ctx, next);
-      expect(next).toHaveBeenCalled();
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(403);
+      expect(next).not.toHaveBeenCalled();
     });
   });
 
   // Task 48 review / Task 26 bug: prefix checks matched the RAW pathname,
-  // so a `/kn/…` twin of a guarded route (`/kn/account`, and defense-in-depth
-  // for `/kn/curator`, `/kn/admin` even though those two have no twin today)
+  // so a `/kn/…` twin of a guarded route (defense-in-depth for `/kn/curator`,
+  // `/kn/admin`, `/kn/transcribe` even though none has a twin today)
   // slipped past the route guard, the synchronizer-token CSRF check, and the
   // noindex header. Fixed by matching against a locale-stripped pathname.
   // These tests exercise the KN-prefixed paths directly against the
@@ -556,19 +532,19 @@ describe('src/middleware.ts', () => {
   // original, and that public `/kn/…` pages remain unguarded/unindexed as
   // before.
   describe('/kn/ locale-twin route guards (Task 48 review, Task 26 bug)', () => {
-    it('unauthenticated GET /kn/account/submissions -> redirect to /login?next=<kn path> (guard now fires on the KN twin)', async () => {
-      const ctx = makeContext({ path: '/kn/account/submissions?x=1' });
+    it('unauthenticated GET /kn/transcribe/12 -> redirect to /login?next=<kn path> (guard fires on the KN twin)', async () => {
+      const ctx = makeContext({ path: '/kn/transcribe/12?x=1' });
       const res = await run(ctx, nextStub());
       expect(res.status).toBe(302);
       expect(res.headers.get('location')).toBe(
-        `/login?next=${encodeURIComponent('/kn/account/submissions?x=1')}`,
+        `/login?next=${encodeURIComponent('/kn/transcribe/12?x=1')}`,
       );
     });
 
-    it('authenticated GET /kn/account passes through (guard recognizes the session)', async () => {
-      const { cookieValue } = await sessionFor(citizenId);
+    it('authenticated GET /kn/curator passes through for a curator (guard recognizes the session)', async () => {
+      const { cookieValue } = await sessionFor(curatorId);
       const next = nextStub(200);
-      const ctx = makeContext({ path: '/kn/account', cookieValue });
+      const ctx = makeContext({ path: '/kn/curator', cookieValue });
       const res = await run(ctx, next);
       expect(next).toHaveBeenCalled();
       expect(res.status).toBe(200);
@@ -581,8 +557,8 @@ describe('src/middleware.ts', () => {
       expect(res.headers.get('location')).toBe(`/login?next=${encodeURIComponent('/kn/curator')}`);
     });
 
-    it('citizen GET /kn/curator -> 403 (wrong role, KN prefix)', async () => {
-      const { cookieValue } = await sessionFor(citizenId);
+    it('transcriber GET /kn/curator -> 403 (wrong role, KN prefix)', async () => {
+      const { cookieValue } = await sessionFor(transcriberId);
       const ctx = makeContext({ path: '/kn/curator', cookieValue });
       const res = await run(ctx, nextStub());
       expect(res.status).toBe(403);
@@ -595,11 +571,11 @@ describe('src/middleware.ts', () => {
       expect(res.status).toBe(403);
     });
 
-    it('CSRF: unsafe POST to /kn/account/notifications without a valid token -> 403 (CSRF check now fires on the KN twin)', async () => {
-      const { cookieValue } = await sessionFor(citizenId);
+    it('CSRF: unsafe POST to /kn/curator/queue/1 without a valid token -> 403 (CSRF check now fires on the KN twin)', async () => {
+      const { cookieValue } = await sessionFor(curatorId);
       const ctx = makeContext({
         method: 'POST',
-        path: '/kn/account/notifications',
+        path: '/kn/curator/queue/1',
         headers: { origin: SITE_ORIGIN },
         cookieValue,
         contentType: 'application/x-www-form-urlencoded',
@@ -609,12 +585,12 @@ describe('src/middleware.ts', () => {
       expect(res.status).toBe(403);
     });
 
-    it('CSRF: unsafe POST to /kn/account/notifications with a valid token passes through', async () => {
-      const { id, cookieValue } = await sessionFor(citizenId);
+    it('CSRF: unsafe POST to /kn/curator/queue/1 with a valid token passes through', async () => {
+      const { id, cookieValue } = await sessionFor(curatorId);
       const next = nextStub(200);
       const ctx = makeContext({
         method: 'POST',
-        path: '/kn/account/notifications',
+        path: '/kn/curator/queue/1',
         headers: { origin: SITE_ORIGIN },
         cookieValue,
         contentType: 'application/x-www-form-urlencoded',
@@ -625,7 +601,7 @@ describe('src/middleware.ts', () => {
       expect(res.status).toBe(200);
     });
 
-    it.each(['/kn/partner/some-slug', '/kn/login', '/kn/account'])(
+    it.each(['/kn/partner/some-slug', '/kn/login', '/kn/curator', '/kn/transcribe'])(
       '%s carries X-Robots-Tag: noindex (KN twin, previously missing)',
       async (path) => {
         const ctx = makeContext({ path });
@@ -645,20 +621,20 @@ describe('src/middleware.ts', () => {
     });
 
     it('locals.lang is still "kn" for a /kn/ path after the guard/noindex fix', async () => {
-      const ctx = makeContext({ path: '/kn/account' });
+      const ctx = makeContext({ path: '/kn/login' });
       await run(ctx, nextStub(200));
       expect(ctx.locals.lang).toBe('kn');
     });
 
     it('locals.lang is still "en" for an EN path', async () => {
-      const ctx = makeContext({ path: '/account' });
+      const ctx = makeContext({ path: '/login' });
       await run(ctx, nextStub(200));
       expect(ctx.locals.lang).toBe('en');
     });
   });
 
   describe('X-Robots-Tag: noindex', () => {
-    it.each(['/account', '/curator', '/admin', '/login', '/partner/some-slug'])(
+    it.each(['/curator', '/admin', '/transcribe', '/login', '/partner/some-slug'])(
       '%s carries X-Robots-Tag: noindex',
       async (path) => {
         const ctx = makeContext({ path });
@@ -733,38 +709,9 @@ describe('src/middleware.ts', () => {
     });
   });
 
-  describe('temporary master-password mode', () => {
+  describe('MASTER_PASSWORD configuration', () => {
     afterEach(() => {
       delete process.env.MASTER_PASSWORD;
-    });
-
-    it.each(['/api/otp/request', '/api/otp/verify'])('POST %s -> 404 in password mode, route never runs', async (path) => {
-      process.env.MASTER_PASSWORD = 'middleware-test-master-password';
-      const next = nextStub();
-      const ctx = makeContext({
-        method: 'POST',
-        path,
-        headers: { 'sec-fetch-site': 'same-origin' },
-        body: JSON.stringify({ destination: 'x@example.com' }),
-        contentType: 'application/json',
-      });
-      const res = await run(ctx, next);
-      expect(res.status).toBe(404);
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('POST /api/otp/request passes through when MASTER_PASSWORD is unset', async () => {
-      const next = nextStub();
-      const ctx = makeContext({
-        method: 'POST',
-        path: '/api/otp/request',
-        headers: { 'sec-fetch-site': 'same-origin' },
-        body: JSON.stringify({ destination: 'x@example.com' }),
-        contentType: 'application/json',
-      });
-      const res = await run(ctx, next);
-      expect(res.status).toBe(200);
-      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('a too-short MASTER_PASSWORD rejects every request, public pages included', async () => {

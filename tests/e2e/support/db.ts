@@ -1,7 +1,7 @@
 /**
- * A single shared Postgres connection for e2e support helpers (the OTP
- * sink reader today) — mirrors the `postgres(...)`/`drizzle(...)` pattern
- * every seed script and unit test already uses (see tests/unit/otp.test.ts),
+ * A single shared Postgres connection for e2e specs — mirrors the
+ * `postgres(...)`/`drizzle(...)` pattern every seed script and unit test
+ * already uses,
  * pointed at whatever `DATABASE_URL` the Playwright run itself uses (the
  * dedicated `bv_e2e` database — see playwright.config.ts's `webServer.env`
  * and this repo's README/task-64 report for why a separate DB from the

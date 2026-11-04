@@ -1,11 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-// SENTRY_DSN must be unset for this whole file — importing logger.ts with no
-// DSN configured must be a clean no-op (no network, no throw). Cleared
-// up-front in case the surrounding shell happens to export one.
-delete process.env.SENTRY_DSN;
-
-import { scrubPii, sentryBeforeSend, isSentryInitialized } from '../../src/lib/logger';
+import { scrubPii } from '../../src/lib/logger';
 
 describe('src/lib/logger.ts#scrubPii', () => {
   it('redacts email, phone, contact, address, destination VALUES', () => {
@@ -107,48 +102,6 @@ describe('src/lib/logger.ts#scrubPii', () => {
   it('defense-in-depth: scrubs an email/phone-shaped VALUE even under an opaque key', () => {
     const out = scrubPii({ message: 'contact me at citizen@example.com' }) as Record<string, unknown>;
     expect(out.message).not.toContain('citizen@example.com');
-  });
-});
-
-describe('src/lib/logger.ts Sentry integration', () => {
-  it('does NOT init Sentry when SENTRY_DSN is unset (no network, no throw)', () => {
-    expect(isSentryInitialized()).toBe(false);
-  });
-
-  it('sentryBeforeSend redacts an email carried in `extra`', () => {
-    const fixture = {
-      message: 'something broke',
-      extra: { email: 'citizen@example.com', wardId: 42 },
-    } as any;
-    const scrubbed = sentryBeforeSend(fixture);
-    expect(scrubbed).not.toBeNull();
-    expect((scrubbed as any).extra.email).toBe('[redacted]');
-    expect((scrubbed as any).extra.wardId).toBe(42);
-  });
-
-  it('sentryBeforeSend redacts an email carried in `request`', () => {
-    const fixture = {
-      message: 'something broke',
-      request: { data: { email: 'citizen@example.com' }, headers: { cookie: 'bv_session=abc' } },
-    } as any;
-    const scrubbed = sentryBeforeSend(fixture);
-    expect((scrubbed as any).request.data.email).toBe('[redacted]');
-    expect((scrubbed as any).request.headers.cookie).toBe('[redacted]');
-  });
-
-  it('sentryBeforeSend redacts contact fields inside breadcrumbs', () => {
-    const fixture = {
-      message: 'something broke',
-      breadcrumbs: [{ message: 'user action', data: { destination: '9876543210' } }],
-    } as any;
-    const scrubbed = sentryBeforeSend(fixture);
-    expect((scrubbed as any).breadcrumbs[0].data.destination).toBe('[redacted]');
-  });
-
-  it('sentryBeforeSend redacts an email embedded in the free-text message string', () => {
-    const fixture = { message: 'failed to notify citizen@example.com' } as any;
-    const scrubbed = sentryBeforeSend(fixture);
-    expect((scrubbed as any).message).not.toContain('citizen@example.com');
   });
 });
 

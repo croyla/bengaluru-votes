@@ -29,7 +29,6 @@ import {
   eraseUser,
   listUsers,
   reactivateUser,
-  USER_LIST_CAP,
   USER_ROLE_FILTERS,
   USER_STATUS_FILTERS,
   type UserRoleFilter,
@@ -44,7 +43,6 @@ const NOTICE_KINDS = ['added', 'roleChanged', 'roleRemoved', 'banned', 'reactiva
 type NoticeKind = (typeof NOTICE_KINDS)[number];
 
 const ROLE_LABEL_KEYS: Record<string, string> = {
-  citizen: 'admin.users.results.roleCitizen',
   transcriber: 'admin.users.results.roleTranscriber',
   curator: 'admin.users.results.roleCurator',
   admin: 'admin.users.results.roleAdmin',
@@ -162,9 +160,9 @@ if (Astro.request.method === 'POST') {
     if (!Number.isInteger(targetUserId)) return badRequest();
     if (!['role', 'ban', 'reactivate', 'erase'].includes(formAction)) return badRequest();
 
-    // `role` is a staff role to set, or 'citizen' to remove staff access.
+    // `role` is a staff role to set, or 'remove' to delete the account.
     const roleRaw = String(form.get('role') ?? '');
-    if (formAction === 'role' && roleRaw !== 'citizen' && !isStaffRole(roleRaw)) return badRequest();
+    if (formAction === 'role' && roleRaw !== 'remove' && !isStaffRole(roleRaw)) return badRequest();
 
     if (!confirmed) {
       message = { kind: 'error', key: 'admin.users.error.confirmRequired' };
@@ -201,24 +199,26 @@ if (Astro.request.method === 'POST') {
   const noticeUserId = Number(params.get('nu'));
   if (notice && Number.isInteger(noticeUserId)) {
     const user = await findUserById(noticeUserId);
-    if (user) {
+    if (!user && notice === 'roleRemoved') {
+      // The account was deleted, so only its id is left to name it by.
+      message = { kind: 'notice', key: 'admin.users.notice.roleRemoved', params: { user: `#${noticeUserId}`, id: String(noticeUserId) } };
+    } else if (user) {
       message = {
         kind: 'notice',
         key: `admin.users.notice.${notice}`,
-        params: { user: user.email ?? user.phone ?? `#${user.id}`, id: String(user.id) },
+        params: { user: user.email ?? `#${user.id}`, id: String(user.id) },
         roleKey: ROLE_LABEL_KEYS[user.role],
       };
     }
   }
 }
 
-const effectiveRole: UserRoleFilter = roleFilter ?? (query.trim() ? 'any' : 'staff');
+const effectiveRole: UserRoleFilter = roleFilter ?? 'staff';
 const effectiveStatus: UserStatusFilter = statusFilter ?? 'any';
 const [list, lang] = await Promise.all([
   listUsers({ query, role: effectiveRole, status: effectiveStatus }),
   loadCuratorLang(session.userId),
 ]);
-const needsQuery = query.trim() === '' && (effectiveRole === 'any' || effectiveRole === 'citizen');
 
 Astro.response.headers.set('cache-control', 'no-store');
 Astro.response.status = responseStatus;
@@ -233,8 +233,6 @@ Astro.response.status = responseStatus;
   statusFilter={effectiveStatus}
   hasExplicitRoleFilter={roleFilter !== undefined}
   rows={list.rows}
-  truncatedAt={list.truncated ? USER_LIST_CAP : undefined}
-  needsQuery={needsQuery}
   message={message}
   addEmail={addEmail}
   addRole={addRole}

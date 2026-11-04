@@ -1,6 +1,6 @@
 /**
  * Cache-invariant + security guard suite (architecture.md §12 NFRs) — the
- * single named enforcement point for the five guarantees that recur across
+ * single named enforcement point for the guarantees that recur across
  * this codebase's individual route suites. Some assertions here re-exercise
  * behavior already covered elsewhere (Task 28/38/53); that duplication is
  * intentional — this file is the one place a reviewer can look to
@@ -11,29 +11,25 @@
  *   1. PUBLIC GET CACHE-INVARIANCE (the core guarantee, architecture §5):
  *      for `/`, `/ward/{id}`, `/candidate/{slug}`, `/voter-faqs`,
  *      `/about` — render once with no Cookie header and once with
- *      a valid `bv_session` cookie for a real logged-in citizen. Assert (a)
+ *      a valid `bv_session` cookie for a real signed-in staff member. Assert (a)
  *      neither response sets `Set-Cookie`, and (b) the HTML bodies are
  *      byte-identical (modulo the expected per-request CSP nonce, which is
  *      normalized out the same way tests/routes/layout.test.ts strips the
  *      container API's own debug attributes — nginx's microcache stores the
  *      whole response as one unit, so a real deployment never needs a
  *      cached body's nonce to match a fresh one).
- *   2. NO-STORE ON NON-PUBLIC ROUTES: `/api/me`, `/account`, `/curator`,
- *      `/admin` all respond with a `cache-control` header containing
- *      `no-store`.
+ *   2. NO-STORE ON NON-PUBLIC ROUTES: `/curator` and `/admin` respond
+ *      with a `cache-control` header containing `no-store`.
  *   3. (removed with the candidate news-link feature, 2026-10-13.)
- *   4. WEBHOOKS REJECT UNSIGNED: `/api/webhooks/sendgrid` and
- *      `/api/webhooks/twilio` 403 an invalid/missing signature and write no
- *      suppression row.
+ *   4. (removed with the SendGrid/Twilio webhooks.)
  *   5. MEDIA VALIDATION: `storeMedia` (the single validation point behind
  *      every curator upload path — src/lib/curator.ts) rejects an oversize
  *      file and an off-type (SVG masquerading as an image) file.
  *
  * Drives every public/authenticated page through the REAL middleware
  * (src/middleware.ts) composed with the real page twin via Astro's
- * container API — same technique as tests/routes/account.test.ts /
- * tests/routes/curator.test.ts. Sessions are minted with the real
- * `createSession` (src/lib/session.ts), same as the account/otp suites.
+ * container API — same technique as tests/routes/curator.test.ts.
+ * Sessions are minted with the real `createSession` (src/lib/session.ts).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { experimental_AstroContainer as AstroContainer } from 'astro/container';
@@ -41,7 +37,6 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { eq, inArray } from 'drizzle-orm';
-import crypto from 'node:crypto';
 import * as schema from '../../src/db/schema';
 import { SESSION_COOKIE, createSession } from '../../src/lib/session';
 import { onRequest } from '../../src/middleware';
@@ -55,12 +50,8 @@ import AboutPage from '../../src/pages/about.astro';
 import * as WardBoundaryRoute from '../../src/pages/ward/[id]/boundary.json';
 import { loadWardPolygons, wardForPoint } from '../../src/lib/geo';
 
-import AccountPage from '../../src/pages/account/index.astro';
 import CuratorIndexPage from '../../src/pages/curator/index.astro';
 import AdminIndexPage from '../../src/pages/admin/index.astro';
-import * as meRoute from '../../src/pages/api/me';
-import { POST as sendgridPOST } from '../../src/pages/api/webhooks/sendgrid';
-import { POST as twilioPOST } from '../../src/pages/api/webhooks/twilio';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -76,7 +67,7 @@ const client = postgres(process.env.DATABASE_URL, { max: 1 });
 const db = drizzle(client, { schema });
 
 // High, task-58-owned id range — clear of every other route suite's fixture
-// ids (see e.g. tests/routes/account.test.ts / tests/unit/metrics.test.ts's
+// ids (see e.g. tests/unit/metrics.test.ts's
 // own "owns Nxxx" comments; 99938-99939 is the first free block after
 // metrics.test.ts's 99930-99937).
 const WARD = {
@@ -91,13 +82,9 @@ const WARD = {
 const CANDIDATE_SLUG = 'cache-invariant-guard-candidate';
 
 
-const CITIZEN_EMAIL = 'cache-invariant-citizen@example.test';
 const CURATOR_EMAIL = 'cache-invariant-curator@example.test';
 const ADMIN_EMAIL = 'cache-invariant-admin@example.test';
-const FIXTURE_EMAILS = [CITIZEN_EMAIL, CURATOR_EMAIL, ADMIN_EMAIL];
-
-const WEBHOOK_BOUNCE_EMAIL = 'cache-invariant-webhook-bounce@example.test';
-const WEBHOOK_STOP_PHONE = '+919999888058';
+const FIXTURE_EMAILS = [CURATOR_EMAIL, ADMIN_EMAIL];
 
 // Task-58-owned actor id for the storeMedia guard (well clear of every other
 // suite's userId fixtures, which are all real inserted users under 99938).
@@ -105,7 +92,7 @@ const MEDIA_ACTOR = { userId: 88058 };
 
 let candidateId: number;
 
-async function upsertUser(email: string, extra: Partial<typeof schema.users.$inferInsert> = {}): Promise<number> {
+async function upsertUser(email: string, extra: { role: 'transcriber' | 'curator' | 'admin' }): Promise<number> {
   const [existing] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, email));
   if (existing) {
     await db.update(schema.users).set(extra).where(eq(schema.users.id, existing.id));
@@ -121,16 +108,6 @@ async function upsertUser(email: string, extra: Partial<typeof schema.users.$inf
 async function sessionFor(userId: number): Promise<string> {
   const { cookieValue } = await createSession(userId);
   return cookieValue;
-}
-
-/** Same Twilio request-signature algorithm as src/pages/api/webhooks/twilio.ts / tests/routes/webhooks.test.ts's `computeTwilioSignature` — sorted param names, URL + name+value concatenated, HMAC-SHA1 base64. */
-function computeTwilioSignature(authToken: string, url: string, params: URLSearchParams): string {
-  const sortedNames = [...params.keys()].sort();
-  let signedString = url;
-  for (const name of sortedNames) {
-    signedString += name + (params.get(name) ?? '');
-  }
-  return crypto.createHmac('sha1', authToken).update(signedString, 'utf8').digest('base64');
 }
 
 async function makeContainer() {
@@ -167,8 +144,8 @@ function normalize(html: string): string {
 /**
  * Drives a request through the REAL middleware (src/middleware.ts) and then
  * the real page/route twin — the same composition production uses (see
- * tests/routes/account.test.ts's `run` for the same pattern, generalized
- * here to cover pages with route params).
+ * tests/routes/curator.test.ts for the same pattern, generalized here to
+ * cover pages with route params).
  */
 async function renderThroughMiddleware(
   page: unknown,
@@ -179,7 +156,7 @@ async function renderThroughMiddleware(
     method?: string;
     /**
      * 'endpoint' for API routes (a module exporting GET/POST/etc., e.g.
-     * `src/pages/api/me.ts`) — the container API renders these via
+     * `src/pages/ward/[id]/boundary.json.ts`) — the container API renders these via
      * `renderEndpoint` rather than the page-component path. Defaults to
      * 'page'. See the container API's own docstring
      * (node_modules/astro/dist/container/index.d.ts): "Useful in case
@@ -241,13 +218,8 @@ describe('§12 cache-invariant + security guard suite', () => {
       .returning({ id: schema.candidates.id });
     candidateId = candidateRow!.id;
 
-    await upsertUser(CITIZEN_EMAIL, { role: 'citizen' });
     await upsertUser(CURATOR_EMAIL, { role: 'curator' });
     await upsertUser(ADMIN_EMAIL, { role: 'admin' });
-
-    await db.delete(schema.suppressions).where(
-      inArray(schema.suppressions.contact, [WEBHOOK_BOUNCE_EMAIL, WEBHOOK_STOP_PHONE]),
-    );
   });
 
   afterAll(async () => {
@@ -262,10 +234,6 @@ describe('§12 cache-invariant + security guard suite', () => {
       await db.delete(schema.sessions).where(inArray(schema.sessions.userId, ids));
     }
     await db.delete(schema.users).where(inArray(schema.users.email, FIXTURE_EMAILS));
-
-    await db.delete(schema.suppressions).where(
-      inArray(schema.suppressions.contact, [WEBHOOK_BOUNCE_EMAIL, WEBHOOK_STOP_PHONE]),
-    );
 
     await client.end();
   });
@@ -290,7 +258,7 @@ describe('§12 cache-invariant + security guard suite', () => {
     it.each(pages)(
       '$name: no Set-Cookie in either case, byte-identical anonymous vs. session-cookie render',
       async ({ page, path, params }) => {
-        const cookieValue = await sessionFor(await upsertUser(CITIZEN_EMAIL, { role: 'citizen' }));
+        const cookieValue = await sessionFor(await upsertUser(CURATOR_EMAIL, { role: 'curator' }));
 
         const anonRes = await renderThroughMiddleware(page, path, { params });
         const authedRes = await renderThroughMiddleware(page, path, { params, cookieValue });
@@ -319,7 +287,7 @@ describe('§12 cache-invariant + security guard suite', () => {
       const boundaryWardId = wardForPoint(12.9716, 77.5946); // central Bengaluru
       expect(boundaryWardId).not.toBeNull();
 
-      const cookieValue = await sessionFor(await upsertUser(CITIZEN_EMAIL, { role: 'citizen' }));
+      const cookieValue = await sessionFor(await upsertUser(CURATOR_EMAIL, { role: 'curator' }));
       const params = { id: String(boundaryWardId) };
       const path = `/ward/${boundaryWardId}/boundary.json`;
 
@@ -346,30 +314,6 @@ describe('§12 cache-invariant + security guard suite', () => {
   // Guard 2: no-store on non-public routes
   // -------------------------------------------------------------------------
   describe('Guard 2 — no-store on non-public routes', () => {
-    it('GET /api/me (anonymous) -> cache-control contains no-store', async () => {
-      // Routed through the SAME real-middleware path (onRequest + the
-      // container API) as the /account, /curator, /admin checks below,
-      // rather than a hand-built `{ locals: { session: null } }` context, so
-      // this also catches a middleware-level cache-control override — not
-      // just a regression in the handler's own JSON_HEADERS
-      // (src/pages/api/me.ts). `routeType: 'endpoint'` tells the container
-      // API to render the module's exported GET rather than treat it as a
-      // page component (see renderThroughMiddleware's docstring above). The
-      // handler-level unit coverage (anonymous/authed shapes, no PII) stays
-      // in tests/routes/me.test.ts; this is only the cache-control guard.
-      const res = await renderThroughMiddleware(meRoute, '/api/me', { routeType: 'endpoint' });
-      expect(res.status).toBe(200);
-      expect(res.headers.get('cache-control')).toContain('no-store');
-    });
-
-    it('GET /account as a signed-in citizen -> cache-control contains no-store', async () => {
-      const userId = await upsertUser(CITIZEN_EMAIL, { role: 'citizen' });
-      const cookieValue = await sessionFor(userId);
-      const res = await renderThroughMiddleware(AccountPage, '/account', { cookieValue });
-      expect(res.status).toBe(200);
-      expect(res.headers.get('cache-control')).toContain('no-store');
-    });
-
     it('GET /curator as a signed-in curator -> cache-control contains no-store', async () => {
       const userId = await upsertUser(CURATOR_EMAIL, { role: 'curator' });
       const cookieValue = await sessionFor(userId);
@@ -384,126 +328,6 @@ describe('§12 cache-invariant + security guard suite', () => {
       const res = await renderThroughMiddleware(AdminIndexPage, '/admin', { cookieValue });
       expect(res.status).toBe(200);
       expect(res.headers.get('cache-control')).toContain('no-store');
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Guard 4: webhooks reject unsigned/invalid requests
-  // -------------------------------------------------------------------------
-  describe('Guard 4 — webhooks reject unsigned requests (Task 53)', () => {
-    it('POST /api/webhooks/sendgrid with no signature headers -> 403, no suppression written', async () => {
-      const body = JSON.stringify([{ event: 'bounce', email: WEBHOOK_BOUNCE_EMAIL }]);
-      const res = await sendgridPOST({
-        request: new Request(`${SITE_ORIGIN}/api/webhooks/sendgrid`, { method: 'POST', body }),
-      } as any);
-
-      expect(res.status).toBe(403);
-
-      const [row] = await db
-        .select()
-        .from(schema.suppressions)
-        .where(eq(schema.suppressions.contact, WEBHOOK_BOUNCE_EMAIL));
-      expect(row).toBeUndefined();
-    });
-
-    it('POST /api/webhooks/sendgrid with a tampered signature -> 403, no suppression written', async () => {
-      const originalKey = process.env.SENDGRID_WEBHOOK_PUBLIC_KEY;
-      const { publicKey, privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-      process.env.SENDGRID_WEBHOOK_PUBLIC_KEY = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
-
-      try {
-        const timestamp = String(Math.floor(Date.now() / 1000));
-        const body = JSON.stringify([{ event: 'bounce', email: WEBHOOK_BOUNCE_EMAIL }]);
-        // Sign a DIFFERENT body so the signature doesn't verify against what's sent.
-        const sign = crypto.createSign('sha256');
-        sign.update(timestamp + JSON.stringify([{ event: 'bounce', email: 'someone-else@example.test' }]));
-        sign.end();
-        const signature = sign.sign(privateKey, 'base64');
-
-        const res = await sendgridPOST({
-          request: new Request(`${SITE_ORIGIN}/api/webhooks/sendgrid`, {
-            method: 'POST',
-            headers: {
-              'x-twilio-email-event-webhook-signature': signature,
-              'x-twilio-email-event-webhook-timestamp': timestamp,
-            },
-            body,
-          }),
-        } as any);
-
-        expect(res.status).toBe(403);
-      } finally {
-        if (originalKey === undefined) delete process.env.SENDGRID_WEBHOOK_PUBLIC_KEY;
-        else process.env.SENDGRID_WEBHOOK_PUBLIC_KEY = originalKey;
-      }
-
-      const [row] = await db
-        .select()
-        .from(schema.suppressions)
-        .where(eq(schema.suppressions.contact, WEBHOOK_BOUNCE_EMAIL));
-      expect(row).toBeUndefined();
-    });
-
-    it('POST /api/webhooks/twilio with no signature header -> 403, no suppression written', async () => {
-      const originalToken = process.env.TWILIO_AUTH_TOKEN;
-      process.env.TWILIO_AUTH_TOKEN = 'cache-invariant-test-token';
-      try {
-        const params = new URLSearchParams({ From: `whatsapp:${WEBHOOK_STOP_PHONE}`, Body: 'STOP' });
-        const res = await twilioPOST({
-          request: new Request('https://bengaluruvotes.opencity.in/api/webhooks/twilio', {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/x-www-form-urlencoded',
-              host: 'bengaluruvotes.opencity.in',
-              'x-forwarded-proto': 'https',
-            },
-            body: params.toString(),
-          }),
-        } as any);
-        expect(res.status).toBe(403);
-      } finally {
-        if (originalToken === undefined) delete process.env.TWILIO_AUTH_TOKEN;
-        else process.env.TWILIO_AUTH_TOKEN = originalToken;
-      }
-
-      const [row] = await db
-        .select()
-        .from(schema.suppressions)
-        .where(eq(schema.suppressions.contact, WEBHOOK_STOP_PHONE));
-      expect(row).toBeUndefined();
-    });
-
-    it('POST /api/webhooks/twilio with a wrong signature -> 403, no suppression written', async () => {
-      const originalToken = process.env.TWILIO_AUTH_TOKEN;
-      process.env.TWILIO_AUTH_TOKEN = 'cache-invariant-test-token';
-      try {
-        const url = 'https://bengaluruvotes.opencity.in/api/webhooks/twilio';
-        const params = new URLSearchParams({ From: `whatsapp:${WEBHOOK_STOP_PHONE}`, Body: 'STOP' });
-        const wrongSignature = computeTwilioSignature('a-completely-different-token', url, params);
-
-        const res = await twilioPOST({
-          request: new Request(url, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/x-www-form-urlencoded',
-              host: 'bengaluruvotes.opencity.in',
-              'x-forwarded-proto': 'https',
-              'x-twilio-signature': wrongSignature,
-            },
-            body: params.toString(),
-          }),
-        } as any);
-        expect(res.status).toBe(403);
-      } finally {
-        if (originalToken === undefined) delete process.env.TWILIO_AUTH_TOKEN;
-        else process.env.TWILIO_AUTH_TOKEN = originalToken;
-      }
-
-      const [row] = await db
-        .select()
-        .from(schema.suppressions)
-        .where(eq(schema.suppressions.contact, WEBHOOK_STOP_PHONE));
-      expect(row).toBeUndefined();
     });
   });
 

@@ -86,7 +86,7 @@ WORKDIR /app
 #                       supercronic's own download below
 # jq                 -> scripts/backup.sh's restic-snapshot-count check
 # ca-certificates    -> TLS for pg_dump/restic/curl/the app's own outbound
-#                       calls (geocode, SendGrid, Twilio, Anthropic, ...)
+#                       calls (geocode, Maps, reCAPTCHA, Anthropic, ...)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates \
@@ -206,8 +206,7 @@ EXPOSE 4321
 # non-root `appuser`, so supercronic's `sh -c` cannot open (let alone create)
 # that redirect target unless the directory exists AND is appuser-writable.
 # Without this, EVERY cron job fails with ENOENT before its command even runs
-# (backups, run-campaign, retention, sitemaps,
-# reconcile-suppressions, translate-retry). Created here, owned by appuser,
+# (backups, sitemaps, translate-retry, flag-cleanup). Created here, owned by appuser,
 # BEFORE the USER switch below (mkdir/chown need root).
 RUN mkdir -p /var/log/gba-jobs && chown appuser:appuser /var/log/gba-jobs
 

@@ -21,14 +21,14 @@
  */
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db, type Tx } from '../db/client';
-import { eoiSubmissions, users } from '../db/schema';
+import { eoiSubmissions, sessions, transcriptionAssignments, users } from '../db/schema';
 import { isUniqueViolation } from './db-errors';
 import { isValidEmail } from './email';
 
 /** The actor shape every mutator below requires — same session shape `src/middleware.ts` puts on `locals.session`, narrowed to admin. */
 export type AdminActor = { userId: number; role: 'admin' };
 
-/** Every role that is not `citizen`. Staff are email-only (docs/architecture.md §7). */
+/** Every role. Only staff have accounts; they are email-only (docs/architecture.md §7). */
 export type StaffRole = 'transcriber' | 'curator' | 'admin';
 
 export const STAFF_ROLES: readonly StaffRole[] = ['transcriber', 'curator', 'admin'];
@@ -130,9 +130,8 @@ export async function addUser(actor: AdminActor, emailRaw: string, role: StaffRo
 }
 
 /**
- * Sets `targetUserId`'s role (citizen → a staff role, or a lateral
- * move between staff roles). Curator and admin are city-wide the moment
- * they are granted.
+ * Moves `targetUserId` between staff roles. Curator and admin are
+ * city-wide the moment they are granted.
  *
  * DEMOTE-AN-ADMIN GUARD (Task 44 review): a staff `role` means
  * this function's only possible DEMOTION is an existing admin set to a
@@ -165,7 +164,11 @@ export async function grantRole(actor: AdminActor, targetUserId: number, role: S
 }
 
 /**
- * Demotes `targetUserId` to `'citizen'`.
+ * Removes `targetUserId`'s staff access by removing the account: its
+ * sessions are deleted, then the `users` row. An account a transcription
+ * assignment still points at cannot be deleted without losing that
+ * history, so it is erased instead (email nulled, status `'erased'`, the
+ * same tombstone as src/lib/erasure.ts's `eraseUser`).
  *
  * LOCKOUT-PREVENTION GUARD (Task 44 review): before applying the change,
  * rejects with `'cannot_revoke_self'` (the caller revoking their own id) or
@@ -186,7 +189,17 @@ export async function revokeRole(actor: AdminActor, targetUserId: number): Promi
 
     await assertNotSelfOrLastAdmin(tx, actor, targetUserId, existing);
 
-    await tx.update(users).set({ role: 'citizen' }).where(eq(users.id, targetUserId));
+    await tx.delete(sessions).where(eq(sessions.userId, targetUserId));
+    const [assignment] = await tx
+      .select({ id: transcriptionAssignments.id })
+      .from(transcriptionAssignments)
+      .where(eq(transcriptionAssignments.transcriberId, targetUserId))
+      .limit(1);
+    if (assignment) {
+      await tx.update(users).set({ email: null, status: 'erased' }).where(eq(users.id, targetUserId));
+    } else {
+      await tx.delete(users).where(eq(users.id, targetUserId));
+    }
   });
 }
 
@@ -224,14 +237,13 @@ export async function loadConsoleStats(): Promise<ConsoleStats> {
 export interface UserSummary {
   id: number;
   email: string | null;
-  phone: string | null;
   role: string;
 }
 
 /** One account by id, or `null`. Feeds `/admin/users`'s post-action confirmation banner. */
 export async function findUserById(userId: number): Promise<UserSummary | null> {
   const [row] = await db
-    .select({ id: users.id, email: users.email, phone: users.phone, role: users.role })
+    .select({ id: users.id, email: users.email, role: users.role })
     .from(users)
     .where(eq(users.id, userId));
   return row ?? null;

@@ -49,6 +49,7 @@
  *   3. `npx playwright test`                (this config)
  */
 import { defineConfig, devices } from '@playwright/test';
+import { E2E_MASTER_PASSWORD } from './tests/e2e/support/master-password';
 
 const PORT = Number(process.env.E2E_PORT ?? 4321);
 const HOST = '127.0.0.1';
@@ -95,17 +96,9 @@ export default defineConfig({
       HOST,
       PORT: String(PORT),
       DATABASE_URL: process.env.DATABASE_URL,
-      // The enabler (Task 64 brief): requestOtp additionally writes the
-      // plaintext code to otp_test_codes (src/lib/otp.ts) ONLY when this is
-      // exactly 'true'. Never set in any production env.
-      OTP_TEST_SINK: 'true',
       SESSION_SECRET,
-      // Belt-and-braces: guards src/lib/send/send.ts's campaign-send path
-      // (unused by these specs, but harmless to also disable). The OTP
-      // path itself (src/lib/send/sendgrid.ts, twilio.ts) already no-ops
-      // with no vendor keys set below — that's the real reason no OTP
-      // email/WhatsApp is ever actually sent in this run.
-      SENDS_DISABLED: 'true',
+      // Staff sign in at /login with this shared password (src/lib/master-login.ts).
+      MASTER_PASSWORD: E2E_MASTER_PASSWORD,
       NODE_ENV: 'test',
     },
   },

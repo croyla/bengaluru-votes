@@ -18,8 +18,8 @@ import { pathToFileURL } from 'node:url';
 export interface Entry { name: string; kind: 'secret' | 'var'; required: boolean }
 export interface BoxDiff { missingInManifest: string[]; missingOnBox: string[]; changed: string[]; wouldBeRemoved: string[] }
 
-/** Must never be set in production (runbook; src/lib/otp.ts, src/lib/send). */
-export const FORBIDDEN = ['OTP_TEST_SINK', 'SENDS_DISABLED'];
+/** Names that must never be set in production: the deploy refuses to render if one has a value. None today. */
+export const FORBIDDEN: string[] = [];
 
 export class EnvRenderError extends Error {}
 

@@ -15,8 +15,7 @@
  *     assertions, since `wards`/`total` is the WHOLE table across every
  *     test file sharing this DB — see fileParallelism:false in
  *     vitest.config.ts, but still avoid brittle exact-array assertions),
- *     per-partner ward set + attributed-registration count
- *     (`users.srcAttribution === slug`).
+ *     per-partner ward set.
  *   - EOI triage: acceptEoiAwareness provisions a partner; acceptEoiCuration
  *     accepts WITHOUT creating a partner or granting any role (no
  *     self-activation); declineEoi; already-processed/not-found
@@ -73,26 +72,24 @@ const ALL_WARD_IDS = ALL_WARDS.map((w) => w.id);
 
 const EMAILS = {
   admin: 'partners-lib-test-admin@example.com',
-  citizen: 'partners-lib-test-citizen@example.com',
-  regUserA1: 'partners-lib-test-reg-a1@example.com',
-  regUserA2: 'partners-lib-test-reg-a2@example.com',
+  transcriber: 'partners-lib-test-transcriber@example.com',
 };
 
 const SLUG_ALPHA = 'partners-test-alpha';
 const SLUG_DUP = 'partners-test-dup-target';
 const SLUG_UPDATE = 'partners-test-update-target';
 const SLUG_AWARENESS = 'partners-test-awareness-accept';
-async function upsertUser(email: string, role: 'citizen' | 'admin', srcAttribution?: string): Promise<number> {
+async function upsertUser(email: string, role: 'transcriber' | 'admin'): Promise<number> {
   const [row] = await db
     .insert(schema.users)
-    .values({ email, role, status: 'active', srcAttribution: srcAttribution ?? null })
-    .onConflictDoUpdate({ target: schema.users.email, set: { role, status: 'active', srcAttribution: srcAttribution ?? null } })
+    .values({ email, role, status: 'active' })
+    .onConflictDoUpdate({ target: schema.users.email, set: { role, status: 'active' } })
     .returning({ id: schema.users.id });
   return row!.id;
 }
 
 let adminId: number;
-let citizenId: number;
+let transcriberId: number;
 let admin: AdminActor;
 const createdPartnerIds: number[] = [];
 const createdEoiIds: number[] = [];
@@ -106,9 +103,7 @@ describe('src/lib/partners.ts (Task 46)', () => {
     }
 
     adminId = await upsertUser(EMAILS.admin, 'admin');
-    citizenId = await upsertUser(EMAILS.citizen, 'citizen');
-    await upsertUser(EMAILS.regUserA1, 'citizen', SLUG_ALPHA);
-    await upsertUser(EMAILS.regUserA2, 'citizen', SLUG_ALPHA);
+    transcriberId = await upsertUser(EMAILS.transcriber, 'transcriber');
 
     admin = { userId: adminId, role: 'admin' };
 
@@ -122,8 +117,7 @@ describe('src/lib/partners.ts (Task 46)', () => {
       await db.delete(schema.partnerWards).where(inArray(schema.partnerWards.partnerId, createdPartnerIds));
       await db.delete(schema.partners).where(inArray(schema.partners.id, createdPartnerIds));
     }
-    await db.delete(schema.users).where(inArray(schema.users.id, [adminId, citizenId]));
-    await db.delete(schema.users).where(inArray(schema.users.email, [EMAILS.regUserA1, EMAILS.regUserA2]));
+    await db.delete(schema.users).where(inArray(schema.users.id, [adminId, transcriberId]));
     await db.delete(schema.wards).where(inArray(schema.wards.id, ALL_WARD_IDS));
     await client.end();
   });
@@ -179,8 +173,8 @@ describe('src/lib/partners.ts (Task 46)', () => {
     });
 
     it('rejects a non-admin actor', async () => {
-      const citizenActor = { userId: citizenId, role: 'citizen' } as unknown as AdminActor;
-      await expect(createPartner(citizenActor, { slug: 'partners-test-should-not-exist', name: 'Nope' })).rejects.toThrow('admin_only');
+      const nonAdminActor = { userId: transcriberId, role: 'transcriber' } as unknown as AdminActor;
+      await expect(createPartner(nonAdminActor, { slug: 'partners-test-should-not-exist', name: 'Nope' })).rejects.toThrow('admin_only');
       const rows = await db.select().from(schema.partners).where(eq(schema.partners.slug, 'partners-test-should-not-exist'));
       expect(rows).toEqual([]);
     });
@@ -215,8 +209,8 @@ describe('src/lib/partners.ts (Task 46)', () => {
     it('rejects a non-admin actor', async () => {
       const { id } = await createPartner(admin, { slug: 'partners-test-nonadmin-update', name: 'Original' });
       createdPartnerIds.push(id);
-      const citizenActor = { userId: citizenId, role: 'citizen' } as unknown as AdminActor;
-      await expect(updatePartner(citizenActor, id, { name: 'Hacked' })).rejects.toThrow('admin_only');
+      const nonAdminActor = { userId: transcriberId, role: 'transcriber' } as unknown as AdminActor;
+      await expect(updatePartner(nonAdminActor, id, { name: 'Hacked' })).rejects.toThrow('admin_only');
       const [row] = await db.select().from(schema.partners).where(eq(schema.partners.id, id));
       expect(row?.name).toBe('Original');
     });
@@ -244,15 +238,14 @@ describe('src/lib/partners.ts (Task 46)', () => {
       const alpha = result.byPartner.find((p) => p.slug === SLUG_ALPHA);
       expect(alpha).toBeDefined();
       expect(alpha!.wardIds.slice().sort((a, b) => a - b)).toEqual([WARD_COVERED_1.id, WARD_COVERED_2.id]);
-      expect(alpha!.registrations).toBe(2); // regUserA1 + regUserA2, both srcAttribution === SLUG_ALPHA
     });
 
-    it('listPartners surfaces slug/name/ward-count/registrations for the roster page', async () => {
+    it('listPartners surfaces slug/name/ward-count for the roster page', async () => {
       const rows = await listPartners();
       const alpha = rows.find((r) => r.slug === SLUG_ALPHA);
       expect(alpha).toBeDefined();
       expect(alpha!.wardIds.length).toBe(2);
-      expect(alpha!.registrations).toBe(2);
+      expect(alpha).not.toHaveProperty('registrations');
     });
   });
 
@@ -283,7 +276,7 @@ describe('src/lib/partners.ts (Task 46)', () => {
     it('acceptEoiCuration marks accepted WITHOUT creating a partner or granting any role — no self-activation', async () => {
       const eoiId = await insertEoi('curation');
       const partnerCountBefore = (await db.select({ id: schema.partners.id }).from(schema.partners)).length;
-      const citizenRoleBefore = (await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId)))[0]?.role;
+      const staffRoleBefore = (await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, transcriberId)))[0]?.role;
 
       await acceptEoiCuration(admin, eoiId);
 
@@ -293,8 +286,8 @@ describe('src/lib/partners.ts (Task 46)', () => {
       const partnerCountAfter = (await db.select({ id: schema.partners.id }).from(schema.partners)).length;
       expect(partnerCountAfter).toBe(partnerCountBefore);
 
-      const citizenRoleAfter = (await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId)))[0]?.role;
-      expect(citizenRoleAfter).toBe(citizenRoleBefore); // unchanged — the /admin/users role change is a separate, manual step
+      const staffRoleAfter = (await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, transcriberId)))[0]?.role;
+      expect(staffRoleAfter).toBe(staffRoleBefore); // unchanged — the /admin/users role change is a separate, manual step
 
     });
 
@@ -332,10 +325,10 @@ describe('src/lib/partners.ts (Task 46)', () => {
 
     it('rejects a non-admin actor on every triage mutator', async () => {
       const eoiId = await insertEoi('curation');
-      const citizenActor = { userId: citizenId, role: 'citizen' } as unknown as AdminActor;
-      await expect(declineEoi(citizenActor, eoiId)).rejects.toThrow('admin_only');
-      await expect(acceptEoiCuration(citizenActor, eoiId)).rejects.toThrow('admin_only');
-      await expect(acceptEoiAwareness(citizenActor, eoiId, { slug: 'partners-test-nonadmin-eoi', name: 'Nope' })).rejects.toThrow('admin_only');
+      const nonAdminActor = { userId: transcriberId, role: 'transcriber' } as unknown as AdminActor;
+      await expect(declineEoi(nonAdminActor, eoiId)).rejects.toThrow('admin_only');
+      await expect(acceptEoiCuration(nonAdminActor, eoiId)).rejects.toThrow('admin_only');
+      await expect(acceptEoiAwareness(nonAdminActor, eoiId, { slug: 'partners-test-nonadmin-eoi', name: 'Nope' })).rejects.toThrow('admin_only');
 
       const [eoi] = await db.select().from(schema.eoiSubmissions).where(eq(schema.eoiSubmissions.id, eoiId));
       expect(eoi?.status).toBe('new');

@@ -4,12 +4,12 @@
  * CSRF token", §13 "CSRF"). `SameSite=Lax` plus the middleware's
  * Origin/Sec-Fetch-Site check (src/middleware.ts) are the first two layers;
  * this is the third, specifically for the no-JS server-rendered form paths
- * under `/account`, `/curator`, `/admin` — pages rendered for a signed-in
+ * under `/curator`, `/admin`, `/transcribe` — pages rendered for a signed-in
  * session embed `issueCsrfToken(sessionId)` in a hidden `csrf_token` field,
  * and the middleware checks it with `checkCsrfToken` on unsafe methods.
  *
- * ANONYMOUS mutating endpoints (the OTP request/verify JSON POSTs, and the
- * EOI form — CAPTCHA-protected, Task 50) have no session to bind a
+ * ANONYMOUS mutating endpoints (the `/login` POST, issue votes, reports and
+ * the EOI form — CAPTCHA-protected, Task 50) have no session to bind a
  * synchronizer token to, so they are NOT covered here: they rely on the
  * Origin/Sec-Fetch-Site check alone (plus their own rate limits/CAPTCHA).
  * Synchronizer tokens only ever protect AUTHENTICATED server-rendered forms.

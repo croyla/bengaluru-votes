@@ -4,12 +4,11 @@
  * (src/islands/FlagModal.ts) — Task 32. Builds a
  * DOM fixture mirroring the exact markup src/components/FlagModal.astro
  * renders (same `data-flag-*`/`data-msg-*` hooks) and drives it via jsdom,
- * mocking `fetch` for /api/me and /api/flags, and `window.bvOpenRegisterLogin`
- * (the Register/Login modal's own global opener, Task 27) so the auth
- * gating + resume handoff can be exercised without that modal's own markup.
+ * mocking `fetch` for /api/flags. Reports are anonymous: there is no
+ * sign-in step in front of the form.
  *
  * jsdom does not implement `HTMLDialogElement.prototype.showModal`/`close`
- * at all — same polyfill as tests/unit/register-modal.test.ts.
+ * at all — hence the small polyfill below.
  *
  * MODULE STATE, PER TEST: the island caches the DOM elements it finds on
  * its first `openFlagModal`/`initFlagModal` call (module-level `els`), so
@@ -19,8 +18,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // jsdom (this repo's version) does not implement
-// `HTMLDialogElement.prototype.showModal`/`close` at all — same minimal
-// polyfill as tests/unit/register-modal.test.ts, applied once at file scope
+// `HTMLDialogElement.prototype.showModal`/`close` at all — a minimal
+// polyfill, applied once at file scope
 // (not inside a single `describe`'s `beforeAll`) so BOTH describe blocks
 // below get it.
 if (!('showModal' in HTMLDialogElement.prototype)) {
@@ -112,14 +111,12 @@ describe('anonymous FlagModal', () => {
     vi.resetModules(); document.body.innerHTML = MODAL_HTML;
     fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, state: 'accepted' }));
     vi.stubGlobal('fetch', fetchMock);
-    window.bvOpenRegisterLogin = vi.fn();
     api = await import('../../src/islands/FlagModal');
   });
-  afterEach(() => { vi.unstubAllGlobals(); delete window.bvOpenRegisterLogin; });
+  afterEach(() => { vi.unstubAllGlobals(); });
   it('opens immediately without asking for login or fetching identity', () => {
     api.openFlagModal({ wardId: 1, targets: TARGETS });
     expect(document.querySelector('dialog')!.hasAttribute('open')).toBe(true);
-    expect(window.bvOpenRegisterLogin).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it('initializes the browser on submit, then submits with CAPTCHA and closes', async () => {

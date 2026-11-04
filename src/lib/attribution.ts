@@ -10,12 +10,11 @@
  * scripts (the other is GA, Task 58/src/lib/analytics.ts) on every page. The script reads
  * `location.search` at runtime (the server HTML is identical with or
  * without `?src` — only the browser sees the query string) and, if a valid
- * slug is present, writes it to the `SRC_COOKIE_NAME` cookie. The
- * registration endpoint (`src/pages/api/otp/verify.ts`, via
- * `src/lib/auth-flow.ts#resolveOrRegister`) reads that same cookie name and
- * persists it onto the new user row as `srcAttribution` — attribution is
- * measurement-only: it grants no permission and changes nothing
- * the citizen sees.
+ * slug is present, writes it to the `SRC_COOKIE_NAME` cookie. Nothing on
+ * the server reads it today (citizen registration, its only reader, was
+ * removed along with `users.src_attribution`); attribution is
+ * measurement-only: it grants no permission and changes nothing the
+ * citizen sees.
  *
  * LAST-VALID-`src`-WINS: the script overwrites any existing `bv_src` cookie
  * whenever the current URL carries a valid slug, and leaves the cookie
@@ -34,7 +33,7 @@
  * covered by tests on both sides) is the guard against drift.
  */
 
-/** Same cookie name the registration endpoint reads (src/pages/api/otp/verify.ts:70, via src/lib/auth-flow.ts). */
+/** The partner-attribution cookie the `?src` writer sets. */
 export const SRC_COOKIE_NAME = 'bv_src';
 
 /** 30 days, in seconds — the window in which "the value survives the visit". */

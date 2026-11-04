@@ -6,38 +6,21 @@
  * ============================================================================
  * ERASURE SEVERS IDENTITY, AGGREGATES SURVIVE — read before changing eraseUser
  * ============================================================================
- * Architecture §7: an admin-triggered deletion request removes OTP,
- * session, contact, and consent data, then leaves the `users` row as an
- * opaque tombstone so issue-vote aggregates and flag submissions retain
- * referential integrity without a path back to the person.
+ * Architecture §7: an admin-triggered deletion request removes session and
+ * contact data, then leaves the `users` row as an opaque tombstone so the
+ * staff work it is credited with (transcription assignments, curator
+ * resolutions, checked-by stamps) keeps pointing at a real row, without a
+ * path back to the person.
  *
- * DELETED (this user's rows only, in the SAME transaction as everything
- * else below): `otp_codes` — both by `userId` (the `add_contact` purpose,
- * which stores it) AND by `destination` matching this user's CURRENT
- * email/phone (the `auth` purpose has no `userId` column at all — it's
- * looked up by contact address, src/lib/otp.ts) — captured BEFORE the
- * `users` row is nulled below, or there would be nothing left to match on;
- * `sessions` — every row for this `userId`.
+ * DELETED (this user's rows only, in the SAME transaction as the update
+ * below): `sessions` — every row for this `userId`.
  *
- * NULLED on the `users` row itself (contact + consent + attribution —
- * exactly what architecture §7 calls "contact data and consent records",
- * nothing more): `email`, `phone`, `srcAttribution`, `consentAt`,
- * `consentVersion`, `futureToolsOptIn` (reset to `false`, its default — a
- * preference tied to the now-deleted consent event, not an independent
- * fact worth keeping). `status` becomes `'erased'`. `emailEnabled`/
- * `whatsappEnabled` are left untouched — inert once both contacts are
- * null, not worth a special-case write.
+ * NULLED on the `users` row itself: `email`.
+ * `status` becomes `'erased'`.
  *
- * KEPT, deliberately: `homeWardId` — NOT contact data (architecture §7's
- * list is OTP/session/contact/consent, and a ward id names a place, not a
- * person), and keeping it is what makes the retired `issue_vote_sets` row
- * still mean something as a WARD-level aggregate after erasure. `role` —
- * an admin/curator target's role field itself is untouched by erasure
- * (see the LAST-ADMIN GUARD below for why erasing an active admin is
- * still guarded the same as banning one). `issue_vote_sets`/
- * `issue_vote_selections` and `flag_submissions` are never touched here;
- * their `userId` still points at the now-opaque row id, which is the point
- * of a tombstone rather than a hard delete.
+ * KEPT, deliberately: `role` — an admin/curator target's role field itself
+ * is untouched by erasure (see the LAST-ADMIN GUARD below for why erasing
+ * an active admin is still guarded the same as banning one).
  *
  * IDEMPOTENT BY CONSTRUCTION, not by a special-cased early return: every
  * write above (null a column that's already null, delete rows that are
@@ -65,18 +48,11 @@
  * (src/lib/session.ts) already returns `null` for any non-`'active'` user,
  * so a banned/erased user's OLD session cookie stops working on its own.
  * Both `banUser` and `eraseUser` still hard-delete the `sessions` rows —
- * belt and braces, and it closes a real gap: `resolveOrRegister`
- * (src/lib/auth-flow.ts) resolves a KNOWN contact to a session WITHOUT
- * checking `status` (see that module — out of scope for this task to
- * change, flagged in the Task 45 report), so a banned user's contact could
- * still mint a FRESH session row via OTP verify after being banned. That
- * new session is still useless (`readSession` blocks it regardless of
- * when it was created), but deleting on every ban call, not just once, is
- * what actually removes the row rather than leaving a dead one behind.
+ * belt and braces, so no dead row is left behind.
  */
-import { and, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, or, sql, type SQL } from 'drizzle-orm';
 import { db, type Tx } from '../db/client';
-import { flagSubmissions, otpCodes, sessions, users, wards } from '../db/schema';
+import { sessions, users } from '../db/schema';
 
 /** Same actor shape src/lib/admin.ts's `AdminActor` uses — every mutator below re-asserts `role === 'admin'` itself (defense in depth, see that module's docstring for the full rationale). */
 export type AdminActor = { userId: number; role: 'admin' };
@@ -87,7 +63,7 @@ function assertAdmin(actor: { role: string }): void {
   }
 }
 
-type ExistingUser = { role: string; status: string; email: string | null; phone: string | null };
+type ExistingUser = { role: string; status: string; email: string | null };
 
 /** Unconditional — an admin must never ban/erase their OWN id, regardless of role/status of anyone involved. */
 function assertNotSelf(actor: AdminActor, targetUserId: number, actionVerb: 'ban' | 'erase'): void {
@@ -128,7 +104,7 @@ export async function eraseUser(actor: AdminActor, targetUserId: number): Promis
 
   await db.transaction(async (tx) => {
     const [existing] = await tx
-      .select({ role: users.role, status: users.status, email: users.email, phone: users.phone })
+      .select({ role: users.role, status: users.status, email: users.email })
       .from(users)
       .where(eq(users.id, targetUserId));
     if (!existing) {
@@ -138,26 +114,12 @@ export async function eraseUser(actor: AdminActor, targetUserId: number): Promis
     assertNotSelf(actor, targetUserId, 'erase');
     await assertNotLastActiveAdmin(tx, existing, 'erase');
 
-    // Captured BEFORE the users row is nulled below — the 'auth' purpose
-    // otp_codes row has no userId at all (src/lib/otp.ts), only a
-    // destination, so this is the only way to find it once email/phone go
-    // null. 'add_contact' purpose rows DO carry userId, covered separately.
-    const destinations = [existing.email, existing.phone].filter((d): d is string => d !== null);
-    if (destinations.length > 0) {
-      await tx.delete(otpCodes).where(inArray(otpCodes.destination, destinations));
-    }
-    await tx.delete(otpCodes).where(eq(otpCodes.userId, targetUserId));
     await tx.delete(sessions).where(eq(sessions.userId, targetUserId));
 
     await tx
       .update(users)
       .set({
         email: null,
-        phone: null,
-        srcAttribution: null,
-        consentAt: null,
-        consentVersion: null,
-        futureToolsOptIn: false,
         status: 'erased',
       })
       .where(eq(users.id, targetUserId));
@@ -166,8 +128,7 @@ export async function eraseUser(actor: AdminActor, targetUserId: number): Promis
 }
 
 /**
- * Deactivates/bans a citizen ("admin can deactivate/ban abusive
- * users"). Kills every active session for the user immediately (see module
+ * Deactivates/bans a staff account. Kills every active session for the user immediately (see module
  * docstring's SESSIONS ARE DELETED note) and rejects an already-erased
  * target (`'cannot_ban_erased'` — erasure is terminal, never re-bannable).
  * `reason`, if given, is accepted for caller compatibility but is not stored.
@@ -177,7 +138,7 @@ export async function banUser(actor: AdminActor, targetUserId: number, _reason?:
 
   await db.transaction(async (tx) => {
     const [existing] = await tx
-      .select({ role: users.role, status: users.status, email: users.email, phone: users.phone })
+      .select({ role: users.role, status: users.status, email: users.email })
       .from(users)
       .where(eq(users.id, targetUserId));
     if (!existing) {
@@ -223,75 +184,45 @@ export async function reactivateUser(actor: AdminActor, targetUserId: number): P
 export interface UserSearchRow {
   id: number;
   email: string | null;
-  phone: string | null;
   status: string;
   role: string;
-  homeWardId: number | null;
-  homeWardNameEn: string | null;
   createdAt: Date;
-  flagSubmissionCount: number;
 }
 
-/** `'staff'` is every staff role at once; `'any'` adds citizens. */
-export type UserRoleFilter = 'staff' | 'any' | 'admin' | 'curator' | 'transcriber' | 'citizen';
+/** `'staff'` is every role at once. */
+export type UserRoleFilter = 'staff' | 'admin' | 'curator' | 'transcriber';
 export type UserStatusFilter = 'any' | 'active' | 'banned' | 'erased';
 
-export const USER_ROLE_FILTERS: readonly UserRoleFilter[] = ['staff', 'any', 'admin', 'curator', 'transcriber', 'citizen'];
+export const USER_ROLE_FILTERS: readonly UserRoleFilter[] = ['staff', 'admin', 'curator', 'transcriber'];
 export const USER_STATUS_FILTERS: readonly UserStatusFilter[] = ['any', 'active', 'banned', 'erased'];
 
 export interface UserListOptions {
   query?: string;
-  /** Defaults to `'staff'` with no query, `'any'` with one. */
+  /** Defaults to `'staff'` (every account). */
   role?: UserRoleFilter;
   status?: UserStatusFilter;
 }
 
 export interface UserList {
   rows: UserSearchRow[];
-  /** More rows matched than `USER_LIST_CAP`; only the first `USER_LIST_CAP` are in `rows`. */
-  truncated: boolean;
 }
 
-/** Row cap for any listing that can include citizens. A staff-only listing is never capped. */
-export const USER_LIST_CAP = 50;
-
-const STAFF_ROLE_VALUES = ['admin', 'curator', 'transcriber'] as const;
-
 /**
- * The `/admin/users` list ("search users"). With no query it lists
- * STAFF (every staff role, or the one `role` names), uncapped — the page's
- * default view. A query matches ANY of — `id` exactly (only tried when
- * `query` is a bare integer; a numeric STRING can just as easily be a
- * phone-number substring, e.g. "99887", so this is unioned with the
- * substring checks below rather than exclusively branching on "looks
- * numeric" — an admin typing digits gets every row that could plausibly
- * mean, not a silently-chosen interpretation), OR a case-insensitive
- * substring of `email`, OR a case-insensitive substring of `phone` — and
- * is narrowed by `role`/`status` when given.
+ * The `/admin/users` list ("search users"). Every account is staff, so the
+ * list is never capped. A query matches ANY of — `id` exactly (only tried
+ * when `query` is a bare integer, unioned with the email check rather than
+ * exclusively branching on "looks numeric"), OR a case-insensitive
+ * substring of `email` — and is narrowed by `role`/`status` when given.
  *
- * CITIZENS ARE NEVER LISTED WITHOUT A QUERY: `role: 'any' | 'citizen'`
- * with an empty/whitespace-only query returns no rows rather than dumping
- * the citizen table — the admin must type something. Any listing that can
- * include citizens is capped at `USER_LIST_CAP`, with `truncated` set when
- * more matched.
- *
- * Rows sort admin, curator, transcriber, citizen, then by email. Each row
- * includes its `flag_submissions` count ("view submission
- * history") — a count only; the full list lives via the flags tooling, not
- * duplicated here.
+ * Rows sort admin, curator, transcriber, then by email.
  */
 export async function listUsers(options: UserListOptions): Promise<UserList> {
   const query = (options.query ?? '').trim();
-  const role = options.role ?? (query ? 'any' : 'staff');
+  const role = options.role ?? 'staff';
   const status = options.status ?? 'any';
-  const includesCitizens = role === 'any' || role === 'citizen';
-
-  if (!query && includesCitizens) return { rows: [], truncated: false };
 
   const conditions: SQL[] = [];
-  if (role === 'staff') {
-    conditions.push(inArray(users.role, [...STAFF_ROLE_VALUES]));
-  } else if (role !== 'any') {
+  if (role !== 'staff') {
     conditions.push(eq(users.role, role));
   }
   if (status !== 'any') {
@@ -303,52 +234,28 @@ export async function listUsers(options: UserListOptions): Promise<UserList> {
     const escapedQuery = query.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
     const pattern = `%${escapedQuery}%`;
 
-    const matches = [
-      sql`${users.email} ILIKE ${pattern} ESCAPE '\\'`,
-      sql`${users.phone} ILIKE ${pattern} ESCAPE '\\'`,
-    ];
+    const matches = [sql`${users.email} ILIKE ${pattern} ESCAPE '\\'`];
     if (/^\d+$/.test(query)) {
       matches.push(eq(users.id, Number(query)));
     }
     conditions.push(or(...matches)!);
   }
 
-  const select = db
+  const rows = await db
     .select({
       id: users.id,
       email: users.email,
-      phone: users.phone,
       status: users.status,
       role: users.role,
-      homeWardId: users.homeWardId,
-      homeWardNameEn: wards.nameEn,
       createdAt: users.createdAt,
     })
     .from(users)
-    .leftJoin(wards, eq(wards.id, users.homeWardId))
     .where(and(...conditions))
     .orderBy(
-      sql`CASE ${users.role} WHEN 'admin' THEN 0 WHEN 'curator' THEN 1 WHEN 'transcriber' THEN 2 ELSE 3 END`,
+      sql`CASE ${users.role} WHEN 'admin' THEN 0 WHEN 'curator' THEN 1 ELSE 2 END`,
       users.email,
       users.id,
     );
 
-  const matchRows = includesCitizens ? await select.limit(USER_LIST_CAP + 1) : await select;
-  const truncated = includesCitizens && matchRows.length > USER_LIST_CAP;
-  const pageRows = truncated ? matchRows.slice(0, USER_LIST_CAP) : matchRows;
-
-  if (pageRows.length === 0) return { rows: [], truncated: false };
-
-  const ids = pageRows.map((r) => r.id);
-  const flagCounts = await db
-    .select({ userId: flagSubmissions.userId, count: sql<number>`count(*)::int` })
-    .from(flagSubmissions)
-    .where(inArray(flagSubmissions.userId, ids))
-    .groupBy(flagSubmissions.userId);
-  const countByUser = new Map(flagCounts.map((f) => [f.userId, Number(f.count)]));
-
-  return {
-    rows: pageRows.map((row) => ({ ...row, flagSubmissionCount: countByUser.get(row.id) ?? 0 })),
-    truncated,
-  };
+  return { rows };
 }

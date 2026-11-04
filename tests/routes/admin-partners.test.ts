@@ -5,7 +5,7 @@
  * container API — same technique as tests/routes/admin-console.test.ts.
  *
  * COVERAGE MAP:
- *   - ADMIN-ONLY: a curator or a citizen hitting the route -> 403; an
+ *   - ADMIN-ONLY: a curator or a transcriber hitting the route -> 403; an
  *     anonymous request redirects to /login.
  *   - RENDER: admin GET renders the roster, coverage summary, and both
  *     EOI queue sections; there is no held-wards table (dropped 2026-08-15).
@@ -55,7 +55,7 @@ const ALL_WARD_IDS = ALL_WARDS.map((w) => w.id);
 const EMAILS = {
   admin: 'admin-partners-route-test-admin@example.com',
   curator: 'admin-partners-route-test-curator@example.com',
-  citizen: 'admin-partners-route-test-citizen@example.com',
+  transcriber: 'admin-partners-route-test-transcriber@example.com',
 };
 
 const SLUG_CREATE = 'partners-route-test-create';
@@ -127,7 +127,7 @@ async function sessionFor(userId: number): Promise<{ cookieValue: string; token:
   return { cookieValue, token: issueCsrfToken(id) };
 }
 
-async function upsertUser(email: string, role: 'citizen' | 'curator' | 'admin'): Promise<number> {
+async function upsertUser(email: string, role: 'transcriber' | 'curator' | 'admin'): Promise<number> {
   const [row] = await db
     .insert(schema.users)
     .values({ email, role, status: 'active' })
@@ -138,10 +138,10 @@ async function upsertUser(email: string, role: 'citizen' | 'curator' | 'admin'):
 
 let adminId: number;
 let curatorId: number;
-let citizenId: number;
+let transcriberId: number;
 let adminAuth: { cookieValue: string; token: string };
 let curatorAuth: { cookieValue: string; token: string };
-let citizenAuth: { cookieValue: string; token: string };
+let transcriberAuth: { cookieValue: string; token: string };
 const createdPartnerIds: number[] = [];
 const createdEoiIds: number[] = [];
 
@@ -155,11 +155,11 @@ describe('/admin/partners (Task 46)', () => {
 
     adminId = await upsertUser(EMAILS.admin, 'admin');
     curatorId = await upsertUser(EMAILS.curator, 'curator');
-    citizenId = await upsertUser(EMAILS.citizen, 'citizen');
+    transcriberId = await upsertUser(EMAILS.transcriber, 'transcriber');
 
     adminAuth = await sessionFor(adminId);
     curatorAuth = await sessionFor(curatorId);
-    citizenAuth = await sessionFor(citizenId);
+    transcriberAuth = await sessionFor(transcriberId);
   });
 
   afterAll(async () => {
@@ -170,8 +170,8 @@ describe('/admin/partners (Task 46)', () => {
       await db.delete(schema.partnerWards).where(inArray(schema.partnerWards.partnerId, createdPartnerIds));
       await db.delete(schema.partners).where(inArray(schema.partners.id, createdPartnerIds));
     }
-    await db.delete(schema.sessions).where(inArray(schema.sessions.userId, [adminId, curatorId, citizenId]));
-    await db.delete(schema.users).where(inArray(schema.users.id, [adminId, curatorId, citizenId]));
+    await db.delete(schema.sessions).where(inArray(schema.sessions.userId, [adminId, curatorId, transcriberId]));
+    await db.delete(schema.users).where(inArray(schema.users.id, [adminId, curatorId, transcriberId]));
     await db.delete(schema.wards).where(inArray(schema.wards.id, ALL_WARD_IDS));
     await client.end();
   });
@@ -182,8 +182,8 @@ describe('/admin/partners (Task 46)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('GET as a citizen -> 403', async () => {
-      const res = await run(PartnersRoute, '/admin/partners', { cookieValue: citizenAuth.cookieValue });
+    it('GET as a transcriber -> 403', async () => {
+      const res = await run(PartnersRoute, '/admin/partners', { cookieValue: transcriberAuth.cookieValue });
       expect(res.status).toBe(403);
     });
 
@@ -307,8 +307,8 @@ describe('/admin/partners (Task 46)', () => {
       const partnerCountAfter = (await db.select({ id: schema.partners.id }).from(schema.partners)).length;
       expect(partnerCountAfter).toBe(partnerCountBefore);
 
-      const [citizenRow] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId));
-      expect(citizenRow?.role).toBe('citizen');
+      const [transcriberRow] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, transcriberId));
+      expect(transcriberRow?.role).toBe('transcriber');
     });
 
     it('decline_eoi marks the EOI declined', async () => {

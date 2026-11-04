@@ -1,7 +1,6 @@
 # GBA Elections Citizen Platform — jobs container crontab (Task 55;
 # architecture.md §10 "Jobs, ops, backups"). Each line invokes one job via
-# `tsx`, exactly like jobs/run-campaign.ts is invoked, against the app
-# codebase this container shares with the web service.
+# `tsx` against the app codebase this container shares with the web service.
 #
 # Task 59 wires PATH/workdir/user for the actual jobs container image and
 # installs this file (e.g. as /etc/cron.d/gba-jobs or under `crond`'s
@@ -22,20 +21,6 @@
 # candidate coverage); rewrites sitemap.xml/sitemap-en.xml/sitemap-kn.xml
 # every hour so lastmod stays fresh.
 0 * * * * cd /app && tsx jobs/regen-sitemaps.ts >> /var/log/gba-jobs/regen-sitemaps.log 2>&1
-
-# Campaign calendar runner (Task 54) — the seven-send comms calendar
-# (registration reminders, candidate-set notices, election-day/logistics
-# sends), subject to the election-silence guardrail. No per-ward gate.
-30 3 * * * cd /app && tsx jobs/run-campaign.ts >> /var/log/gba-jobs/run-campaign.log 2>&1
-
-# Suppression reconciliation — safety net against a lost SendGrid webhook
-# event; a no-op until SENDGRID_API_KEY is configured.
-0 5 * * * cd /app && tsx jobs/reconcile-suppressions.ts >> /var/log/gba-jobs/reconcile-suppressions.log 2>&1
-
-# DPDP retention enforcement — SHIPS DISABLED pending legal
-# sign-off on the retention period (docs/architecture.md §15, Open questions); logs a loud warning and erases no one
-# unless RETENTION_ENABLED=true is explicitly set.
-0 6 * * * cd /app && tsx jobs/retention.ts >> /var/log/gba-jobs/retention.log 2>&1
 
 # Nightly backup — pg_dump -> restic -> verify snapshot count increased ->
 # healthchecks.io ping. See scripts/backup.sh's header for the required env

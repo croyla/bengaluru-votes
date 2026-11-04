@@ -16,7 +16,8 @@ describe('robots.txt (Task 57; architecture §8)', () => {
     const body = await (await GET({} as any)).text();
     expect(body).toContain('User-agent: *');
     expect(body).toContain('Allow: /');
-    expect(body).toContain('Disallow: /account/');
+    expect(body).toContain('Disallow: /transcribe/');
+    expect(body).not.toContain('Disallow: /account/');
     expect(body).toContain('Disallow: /curator/');
     expect(body).toContain('Disallow: /admin/');
     expect(body).toContain('Disallow: /partner/');

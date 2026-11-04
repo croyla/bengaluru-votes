@@ -47,7 +47,7 @@ Ref: Order SECK/ULB/OTHR/1/2026-ULB dated 22/04/2026, e-Gazette Part III, No. 32
 
 Every field you see on a candidate's page carries a visible source — so you can always tell whether something comes from an official affidavit or from curator-compiled context, and where to find the original document. Curators are trusted volunteers with local knowledge, scoped to specific wards or a zone; their edits go live immediately.
 
-If you spot something wrong, you can flag it from any candidate page — flagging is open to everyone, in any ward, no account needed to raise a flag, though we ask you to sign in before it's submitted so we can follow up if we need more detail.
+If you spot something wrong, you can flag it from any candidate page — flagging is open to everyone, in any ward, and no account is needed.
 
 Much of Bengaluru's open civic data resides in the Karnataka Geographic Information System (KGIS), the state's public spatial-data platform run by the Karnataka State Remote Sensing Applications Centre (KSRSAC). This app uses the following datasets:
 
@@ -61,4 +61,4 @@ We don't endorse or oppose any candidate, party, or position. Candidates are pre
 
 ## What do you do with my data?
 
-In short: we don't sell it, and we don't hand it to anyone except the handful of service providers that keep the platform running — under contract, on our behalf, never for their own purposes. Contact details you give us (email or phone) are used for two things only: election updates for your registered ward, and critical, service-affecting product notices. They are never used to market anything else, and never sold. The full breakdown of what's collected, who processes it, and your rights over it lives on our [privacy policy](/privacy).
+In short: we don't sell it, and we don't hand it to anyone except the handful of service providers that keep the platform running — under contract, on our behalf, never for their own purposes. We don't ask citizens for contact details: there are no citizen accounts, and voting and reporting are anonymous. The full breakdown of what's collected, who processes it, and your rights over it lives on our [privacy policy](/privacy).

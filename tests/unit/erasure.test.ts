@@ -5,12 +5,9 @@
  * HTTP/middleware layer — that's tests/routes/admin-users.test.ts).
  *
  * COVERAGE MAP:
- *   - ERASURE SEVERS IDENTITY, AGGREGATES SURVIVE (the load-bearing test):
- *     otp_codes + sessions deleted, users row's contact/consent nulled and
- *     status -> 'erased', homeWardId KEPT, and issue_vote_sets/selections,
- *     flag_submissions, and audit_log rows all SURVIVE untouched — the
- *     erased user's id stays as an opaque tombstone everywhere it's
- *     referenced. The erase_user audit row itself carries no PII.
+ *   - ERASURE SEVERS IDENTITY (the load-bearing test): sessions deleted,
+ *     users row's email nulled and status -> 'erased'; the row itself
+ *     stays as an opaque tombstone for anything that references its id.
  *   - IDEMPOTENT: erasing an already-erased user doesn't throw or corrupt
  *     anything.
  *   - BAN: sessions killed, readSession blocks the old cookie. REACTIVATE:
@@ -19,8 +16,8 @@
  *   - SELF / LAST-ADMIN GUARDS: mirrors src/lib/admin.ts's guard, with this
  *     module's own ban_/erase_ error codes.
  *   - ADMIN-ONLY: every mutator rejects a non-admin actor.
- *   - listUsers: staff by default; by id, by email/phone substring; role
- *     and status filters; citizens never listed without a query; the cap.
+ *   - listUsers: every staff account by default, never capped; by id, by
+ *     email substring; role and status filters.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -62,7 +59,7 @@ const EMAILS = {
   extraAdmin: 'erasure-test-extra-admin@example.com',
   bannedAdmin: 'erasure-test-banned-admin@example.com',
   bannedAdmin2: 'erasure-test-banned-admin-2@example.com',
-  citizen: 'erasure-test-citizen@example.com',
+  plain: 'erasure-test-plain@example.com',
   eraseTarget: 'erasure-test-erase-target@example.com',
   banTarget: 'erasure-test-ban-target@example.com',
   reactivateTarget: 'erasure-test-reactivate-target@example.com',
@@ -70,13 +67,11 @@ const EMAILS = {
   reactivateErasedTarget: 'erasure-test-reactivate-erased-target@example.com',
   searchByEmail: 'erasure-test-search-alpha@example.com',
 };
-const ERASE_TARGET_PHONE = '+919900011122';
-const SEARCH_PHONE = '+919900099887';
 
 type UserInsert = typeof schema.users.$inferInsert;
 
 async function upsertUser(email: string, fields: Partial<UserInsert> = {}): Promise<number> {
-  const values: UserInsert = { email, role: 'citizen', status: 'active', ...fields };
+  const values: UserInsert = { email, role: 'transcriber', status: 'active', ...fields };
   const [row] = await db
     .insert(schema.users)
     .values(values)
@@ -86,7 +81,7 @@ async function upsertUser(email: string, fields: Partial<UserInsert> = {}): Prom
 }
 
 let adminId: number;
-let citizenId: number;
+let plainId: number;
 let eraseTargetId: number;
 let banTargetId: number;
 let reactivateTargetId: number;
@@ -103,27 +98,20 @@ describe('src/lib/erasure.ts (Task 45)', () => {
     await db.insert(schema.wards).values(WARD).onConflictDoUpdate({ target: schema.wards.id, set: WARD });
 
     adminId = await upsertUser(EMAILS.admin, { role: 'admin' });
-    citizenId = await upsertUser(EMAILS.citizen);
-    eraseTargetId = await upsertUser(EMAILS.eraseTarget, {
-      phone: ERASE_TARGET_PHONE,
-      homeWardId: WARD.id,
-      srcAttribution: 'rwa-flyer',
-      consentAt: new Date(),
-      consentVersion: 'v1',
-      futureToolsOptIn: true,
-    });
+    plainId = await upsertUser(EMAILS.plain);
+    eraseTargetId = await upsertUser(EMAILS.eraseTarget);
     banTargetId = await upsertUser(EMAILS.banTarget);
     reactivateTargetId = await upsertUser(EMAILS.reactivateTarget, { status: 'banned' });
     banErasedTargetId = await upsertUser(EMAILS.banErasedTarget);
     reactivateErasedTargetId = await upsertUser(EMAILS.reactivateErasedTarget);
-    searchByEmailId = await upsertUser(EMAILS.searchByEmail, { phone: SEARCH_PHONE, homeWardId: WARD.id });
+    searchByEmailId = await upsertUser(EMAILS.searchByEmail);
 
     admin = { userId: adminId, role: 'admin' };
   });
 
   afterAll(async () => {
     const userIds = [
-      citizenId,
+      plainId,
       eraseTargetId,
       banTargetId,
       reactivateTargetId,
@@ -132,104 +120,28 @@ describe('src/lib/erasure.ts (Task 45)', () => {
       searchByEmailId,
       ...extraFixtureIds,
     ];
-    await db.delete(schema.issueVoteSelections).where(
-      inArray(
-        schema.issueVoteSelections.setId,
-        db.select({ id: schema.issueVoteSets.id }).from(schema.issueVoteSets).where(inArray(schema.issueVoteSets.userId, userIds)),
-      ),
-    );
-    await db.delete(schema.issueVoteSets).where(inArray(schema.issueVoteSets.userId, userIds));
-    await db.delete(schema.flagSubmissions).where(inArray(schema.flagSubmissions.userId, userIds));
-    await db.delete(schema.flagItems).where(eq(schema.flagItems.wardId, WARD.id));
-    await db.delete(schema.wardIssues).where(eq(schema.wardIssues.wardId, WARD.id));
-    await db.delete(schema.otpCodes).where(inArray(schema.otpCodes.userId, userIds));
-    await db.delete(schema.otpCodes).where(inArray(schema.otpCodes.destination, [ERASE_TARGET_PHONE, EMAILS.eraseTarget]));
     await db.delete(schema.sessions).where(inArray(schema.sessions.userId, [adminId, ...userIds]));
     await db.delete(schema.users).where(inArray(schema.users.id, [adminId, ...userIds]));
     await db.delete(schema.wards).where(eq(schema.wards.id, WARD.id));
     await client.end();
   });
 
-  describe('eraseUser: severs identity, aggregates survive', () => {
-    it('nulls contact/consent, sets status erased, deletes otp/sessions, but keeps votes and flags', async () => {
-      // Contact/consent/attribution present before erasure.
+  describe('eraseUser: severs identity, keeps the tombstone row', () => {
+    it('nulls the email, sets status erased, deletes sessions, and keeps the row', async () => {
       const [before] = await db.select().from(schema.users).where(eq(schema.users.id, eraseTargetId));
       expect(before?.email).toBe(EMAILS.eraseTarget);
-      expect(before?.phone).toBe(ERASE_TARGET_PHONE);
 
-      // Session + OTP code (the 'auth' purpose has no userId — looked up by
-      // destination, src/lib/otp.ts — so this specifically exercises the
-      // destination-based delete).
       const { id: sessionId } = await createSession(eraseTargetId);
-      await db.insert(schema.otpCodes).values({
-        destination: EMAILS.eraseTarget,
-        channel: 'email',
-        purpose: 'auth',
-        codeHash: 'deadbeef',
-        expiresAt: new Date(Date.now() + 60_000),
-      });
-
-      // An issue-vote aggregate (ward-level) tied to this user.
-      const [wardIssue] = await db
-        .insert(schema.wardIssues)
-        .values({ wardId: WARD.id, titleEn: 'Erasure test issue', authoredLang: 'en', translationStatus: 'done', position: 0 })
-        .returning({ id: schema.wardIssues.id });
-      const [voteSet] = await db
-        .insert(schema.issueVoteSets)
-        .values({ userId: eraseTargetId, wardId: WARD.id, active: true })
-        .returning({ id: schema.issueVoteSets.id });
-      await db.insert(schema.issueVoteSelections).values({ setId: voteSet!.id, wardIssueId: wardIssue!.id });
-
-      // A flag submission (provenance of a contribution).
-      const [flagItem] = await db
-        .insert(schema.flagItems)
-        .values({ wardId: WARD.id, targetType: 'ward_issue', targetRef: `ward_issue:${wardIssue!.id}`, status: 'pending' })
-        .returning({ id: schema.flagItems.id });
-      await db.insert(schema.flagSubmissions).values({
-        flagItemId: flagItem!.id,
-        userId: eraseTargetId,
-        detail: 'Erasure test flag detail',
-      });
 
       await eraseUser(admin, eraseTargetId);
 
       const [after] = await db.select().from(schema.users).where(eq(schema.users.id, eraseTargetId));
+      expect(after?.id).toBe(eraseTargetId);
       expect(after?.status).toBe('erased');
       expect(after?.email).toBeNull();
-      expect(after?.phone).toBeNull();
-      expect(after?.srcAttribution).toBeNull();
-      expect(after?.consentAt).toBeNull();
-      expect(after?.consentVersion).toBeNull();
-      expect(after?.futureToolsOptIn).toBe(false);
-      // KEPT: homeWardId — not contact data; keeps the vote aggregate
-      // meaningful as a ward-level fact.
-      expect(after?.homeWardId).toBe(WARD.id);
 
-      // DELETED: otp_codes (both the destination-keyed 'auth' row and any
-      // userId-keyed row) and sessions.
-      const otpRows = await db
-        .select()
-        .from(schema.otpCodes)
-        .where(inArray(schema.otpCodes.destination, [EMAILS.eraseTarget, ERASE_TARGET_PHONE]));
-      expect(otpRows).toEqual([]);
       const sessionRows = await db.select().from(schema.sessions).where(eq(schema.sessions.id, sessionId));
       expect(sessionRows).toEqual([]);
-
-      // KEPT: the vote aggregate.
-      const voteSetRows = await db.select().from(schema.issueVoteSets).where(eq(schema.issueVoteSets.id, voteSet!.id));
-      expect(voteSetRows.length).toBe(1);
-      expect(voteSetRows[0]?.userId).toBe(eraseTargetId);
-      const selectionRows = await db
-        .select()
-        .from(schema.issueVoteSelections)
-        .where(eq(schema.issueVoteSelections.setId, voteSet!.id));
-      expect(selectionRows.length).toBe(1);
-
-      // KEPT: the flag submission's provenance.
-      const flagSubRows = await db.select().from(schema.flagSubmissions).where(eq(schema.flagSubmissions.flagItemId, flagItem!.id));
-      expect(flagSubRows.length).toBe(1);
-      expect(flagSubRows[0]?.userId).toBe(eraseTargetId);
-
     });
 
     it('is idempotent: erasing an already-erased user does not throw or change anything further', async () => {
@@ -241,12 +153,11 @@ describe('src/lib/erasure.ts (Task 45)', () => {
       const [after] = await db.select().from(schema.users).where(eq(schema.users.id, eraseTargetId));
       expect(after?.status).toBe('erased');
       expect(after?.email).toBeNull();
-      expect(after?.homeWardId).toBe(WARD.id);
     });
 
     it('rejects a non-admin actor without touching the DB', async () => {
-      const citizenActor = { userId: citizenId, role: 'citizen' } as unknown as AdminActor;
-      await expect(eraseUser(citizenActor, banTargetId)).rejects.toThrow();
+      const transcriberActor = { userId: plainId, role: 'transcriber' } as unknown as AdminActor;
+      await expect(eraseUser(transcriberActor, banTargetId)).rejects.toThrow();
       const [row] = await db.select({ status: schema.users.status }).from(schema.users).where(eq(schema.users.id, banTargetId));
       expect(row?.status).toBe('active');
     });
@@ -291,9 +202,9 @@ describe('src/lib/erasure.ts (Task 45)', () => {
     });
 
     it('rejects a non-admin actor for both banUser and reactivateUser', async () => {
-      const citizenActor = { userId: citizenId, role: 'citizen' } as unknown as AdminActor;
-      await expect(banUser(citizenActor, reactivateTargetId)).rejects.toThrow();
-      await expect(reactivateUser(citizenActor, reactivateTargetId)).rejects.toThrow();
+      const transcriberActor = { userId: plainId, role: 'transcriber' } as unknown as AdminActor;
+      await expect(banUser(transcriberActor, reactivateTargetId)).rejects.toThrow();
+      await expect(reactivateUser(transcriberActor, reactivateTargetId)).rejects.toThrow();
     });
   });
 
@@ -328,7 +239,7 @@ describe('src/lib/erasure.ts (Task 45)', () => {
         .from(schema.users)
         .where(and(eq(schema.users.role, 'admin'), eq(schema.users.status, 'active'), ne(schema.users.id, adminId)));
       for (const row of others) {
-        await db.update(schema.users).set({ role: 'citizen' }).where(eq(schema.users.id, row.id));
+        await db.update(schema.users).set({ role: 'curator' }).where(eq(schema.users.id, row.id));
       }
 
       const bannedAdminId = await upsertUser(EMAILS.bannedAdmin, { role: 'admin', status: 'banned' });
@@ -352,25 +263,26 @@ describe('src/lib/erasure.ts (Task 45)', () => {
   });
 
   describe('listUsers', () => {
-    it('returns no rows for an empty/whitespace query once citizens are in scope', async () => {
-      expect((await listUsers({ query: '', role: 'any' })).rows).toEqual([]);
-      expect((await listUsers({ query: '   ', role: 'citizen' })).rows).toEqual([]);
+    it('treats an empty/whitespace query as no query: every staff account', async () => {
+      const all = (await listUsers({})).rows.map((r) => r.id);
+      expect((await listUsers({ query: '' })).rows.map((r) => r.id)).toEqual(all);
+      expect((await listUsers({ query: '   ' })).rows.map((r) => r.id)).toEqual(all);
+      expect(all).toContain(plainId);
     });
 
     it('matches by exact numeric id', async () => {
       // Scoped to this test's OWN fixture row rather than asserting the
       // result array is exactly [searchByEmailId] / reading rows[0]: per
       // listUsers' docstring, a numeric query is unioned with substring
-      // matches on email/phone BY DESIGN ("an admin typing digits gets
+      // matches on email BY DESIGN ("an admin typing digits gets
       // every row that could plausibly mean"), so other users elsewhere
-      // in the shared test DB whose email/phone happens to contain this
+      // in the shared test DB whose email happens to contain this
       // id's digits as a substring can legitimately also match and sort
       // ahead of it — that's not a bug in listUsers, so this assertion
       // must not depend on being the only/first match.
       const rows = (await listUsers({ query: String(searchByEmailId) })).rows;
       const row = rows.find((r) => r.id === searchByEmailId);
       expect(row).toBeDefined();
-      expect(row?.homeWardNameEn).toBe(WARD.nameEn);
     });
 
     it('matches by email substring, case-insensitively', async () => {
@@ -378,20 +290,11 @@ describe('src/lib/erasure.ts (Task 45)', () => {
       expect(rows.some((r) => r.id === searchByEmailId)).toBe(true);
     });
 
-    it('matches by phone substring', async () => {
-      const rows = (await listUsers({ query: '99887' })).rows;
-      expect(rows.some((r) => r.id === searchByEmailId)).toBe(true);
-    });
-
-    it('includes a flagSubmissionCount (0 for a user with no flags)', async () => {
-      // Same scoping rationale as the "matches by exact numeric id" test
-      // above: find this test's own fixture row rather than assuming it's
-      // rows[0] — an unrelated user elsewhere in the shared test DB whose
-      // email/phone substring-matches this numeric query can legitimately
-      // sort first without affecting THIS user's (correctly zero) count.
+    it('each row carries only id, email, status, role and createdAt', async () => {
+      // Same scoping rationale as the "matches by exact numeric id" test above.
       const rows = (await listUsers({ query: String(searchByEmailId) })).rows;
       const row = rows.find((r) => r.id === searchByEmailId);
-      expect(row?.flagSubmissionCount).toBe(0);
+      expect(Object.keys(row!).sort()).toEqual(['createdAt', 'email', 'id', 'role', 'status']);
     });
 
     it('returns [] for no match', async () => {
@@ -435,18 +338,16 @@ describe('src/lib/erasure.ts (Task 45)', () => {
       expect(matchedIds).toContain(userId1);
     });
 
-    it('with no query lists staff only, admins first, with the date each was added', async () => {
+    it('with no query lists every role, admins first, with the date each was added', async () => {
       const curatorId = await upsertUser('erasure-test-list-curator@example.com', { role: 'curator' });
       const transcriberId = await upsertUser('erasure-test-list-transcriber@example.com', { role: 'transcriber' });
       extraFixtureIds.push(curatorId, transcriberId);
 
-      const { rows, truncated } = await listUsers({});
+      const { rows } = await listUsers({});
       const ids = rows.map((r) => r.id);
       expect(ids).toContain(adminId);
       expect(ids).toContain(curatorId);
       expect(ids).toContain(transcriberId);
-      expect(ids).not.toContain(citizenId);
-      expect(truncated).toBe(false);
       expect(ids.indexOf(adminId)).toBeLessThan(ids.indexOf(curatorId));
       expect(ids.indexOf(curatorId)).toBeLessThan(ids.indexOf(transcriberId));
       expect(rows.find((r) => r.id === adminId)?.createdAt).toBeInstanceOf(Date);
@@ -460,8 +361,8 @@ describe('src/lib/erasure.ts (Task 45)', () => {
     });
 
     it('filters by status, combined with a query', async () => {
-      const bannedId = await upsertUser('erasure-test-list-banned@example.com', { status: 'banned' });
-      const activeId = await upsertUser('erasure-test-list-active@example.com');
+      const bannedId = await upsertUser('erasure-test-list-banned@example.com', { role: 'curator', status: 'banned' });
+      const activeId = await upsertUser('erasure-test-list-active@example.com', { role: 'curator' });
       extraFixtureIds.push(bannedId, activeId);
 
       const { rows } = await listUsers({ query: 'erasure-test-list-', status: 'banned' });
@@ -474,14 +375,14 @@ describe('src/lib/erasure.ts (Task 45)', () => {
       expect(rows[0]?.role).toBe('transcriber');
     });
 
-    it('caps a search that can include citizens at 50 rows and says so', async () => {
+    it('never caps the list: 51 matches return 51 rows', async () => {
       const ids: number[] = [];
       for (let i = 0; i < 51; i++) ids.push(await upsertUser(`erasure-test-cap-${i}@example.com`));
       extraFixtureIds.push(...ids);
 
-      const { rows, truncated } = await listUsers({ query: 'erasure-test-cap-' });
-      expect(rows).toHaveLength(50);
-      expect(truncated).toBe(true);
+      const result = await listUsers({ query: 'erasure-test-cap-' });
+      expect(result.rows).toHaveLength(51);
+      expect(result).not.toHaveProperty('truncated');
     });
   });
 });

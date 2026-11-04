@@ -4,7 +4,7 @@
  * container API — same technique as tests/routes/curator-ward.test.ts.
  *
  * COVERAGE MAP:
- *   - ADMIN-ONLY: a curator or a citizen hitting /admin -> 403
+ *   - ADMIN-ONLY: a curator or a transcriber hitting /admin -> 403
  *     (src/middleware.ts's /admin/* route class).
  *   - CONSOLE: /admin renders its nav links (Manage users, Partners &
  *     coverage) and no longer links the retired Roles page.
@@ -42,7 +42,7 @@ const db = drizzle(client, { schema });
 const EMAILS = {
   admin: 'admin-roles-route-test-admin@example.com',
   curator: 'admin-roles-route-test-curator@example.com',
-  citizen: 'admin-roles-route-test-citizen@example.com',
+  transcriber: 'admin-roles-route-test-transcriber@example.com',
 };
 
 function normalize(html: string): string {
@@ -102,7 +102,7 @@ async function sessionFor(userId: number): Promise<{ cookieValue: string; token:
   return { cookieValue, token: issueCsrfToken(id) };
 }
 
-async function upsertUser(email: string, role: 'citizen' | 'curator' | 'admin'): Promise<number> {
+async function upsertUser(email: string, role: 'transcriber' | 'curator' | 'admin'): Promise<number> {
   const [row] = await db
     .insert(schema.users)
     .values({ email, role, status: 'active' })
@@ -113,10 +113,10 @@ async function upsertUser(email: string, role: 'citizen' | 'curator' | 'admin'):
 
 let adminId: number;
 let curatorId: number;
-let citizenId: number;
+let transcriberId: number;
 let adminAuth: { cookieValue: string; token: string };
 let curatorAuth: { cookieValue: string; token: string };
-let citizenAuth: { cookieValue: string; token: string };
+let transcriberAuth: { cookieValue: string; token: string };
 
 describe('/admin, retired /admin/roles (Task 44)', () => {
   beforeAll(async () => {
@@ -124,15 +124,15 @@ describe('/admin, retired /admin/roles (Task 44)', () => {
 
     adminId = await upsertUser(EMAILS.admin, 'admin');
     curatorId = await upsertUser(EMAILS.curator, 'curator');
-    citizenId = await upsertUser(EMAILS.citizen, 'citizen');
+    transcriberId = await upsertUser(EMAILS.transcriber, 'transcriber');
 
     adminAuth = await sessionFor(adminId);
     curatorAuth = await sessionFor(curatorId);
-    citizenAuth = await sessionFor(citizenId);
+    transcriberAuth = await sessionFor(transcriberId);
   });
 
   afterAll(async () => {
-    const userIds = [curatorId, citizenId];
+    const userIds = [curatorId, transcriberId];
     await db.delete(schema.sessions).where(inArray(schema.sessions.userId, [adminId, ...userIds]));
     await db.delete(schema.users).where(inArray(schema.users.id, [adminId, ...userIds]));
     await client.end();
@@ -144,8 +144,8 @@ describe('/admin, retired /admin/roles (Task 44)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('GET /admin as a citizen -> 403', async () => {
-      const res = await run(ConsoleRoute, '/admin', { cookieValue: citizenAuth.cookieValue });
+    it('GET /admin as a transcriber -> 403', async () => {
+      const res = await run(ConsoleRoute, '/admin', { cookieValue: transcriberAuth.cookieValue });
       expect(res.status).toBe(403);
     });
   });

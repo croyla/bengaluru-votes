@@ -280,7 +280,7 @@ describe('Partner kit (/partner/{slug}, /kn/partner/{slug})', () => {
       const html = await (await renderPartnerKit('en', SLUG)).text();
       const scriptSrcs = [...html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)].map((m) => m[1]);
       // Astro bundles the page's own <script> (importing initCopyButtons)
-      // plus Base's own MeSlot-mounting script — both pre-existing,
+      // plus Base's FlagModal island script — both pre-existing,
       // hashed/external files, never inline nonce'd scripts.
       expect(scriptSrcs.length).toBeGreaterThan(0);
       expect(html).not.toMatch(/<script[^>]*nonce=/);

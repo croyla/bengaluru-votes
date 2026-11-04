@@ -1,7 +1,7 @@
 ---
 /**
- * `/admin/users` (Tasks 44/45; docs/architecture.md §7). The one screen for accounts: staff are listed by
- * default, a search reaches citizens, and each row carries its own
+ * `/admin/users` (Tasks 44/45; docs/architecture.md §7). The one screen for staff accounts: every
+ * account is listed, a search narrows the list, and each row carries its own
  * actions — change role (which absorbed the old `/admin/roles` grant and
  * revoke), ban or reactivate, and the DPDP erasure routine (see
  * src/lib/erasure.ts's module docstring for exactly what erasure
@@ -55,10 +55,6 @@ interface Props {
   /** Whether `roleFilter` came from the URL (carried through POSTs) or is just the default for this view. */
   hasExplicitRoleFilter: boolean;
   rows: UserSearchRow[];
-  /** Set when more accounts matched than are shown — the number shown. */
-  truncatedAt?: number;
-  /** No query was given for a view that includes citizens, so nothing was looked up. */
-  needsQuery: boolean;
   message?: { kind: 'notice' | 'error'; key: string; params?: Record<string, string>; roleKey?: string };
   /** Email and role typed into the add-user form, echoed back after a rejected submit. */
   addEmail?: string;
@@ -74,8 +70,6 @@ const {
   statusFilter,
   hasExplicitRoleFilter,
   rows,
-  truncatedAt,
-  needsQuery,
   message,
   addEmail = '',
   addRole = 'transcriber',
@@ -86,7 +80,6 @@ const messageText = message
   : undefined;
 
 const roleLabelKeys: Record<string, string> = {
-  citizen: 'admin.users.results.roleCitizen',
   transcriber: 'admin.users.results.roleTranscriber',
   curator: 'admin.users.results.roleCurator',
   admin: 'admin.users.results.roleAdmin',
@@ -94,8 +87,7 @@ const roleLabelKeys: Record<string, string> = {
 
 const roleFilterLabelKeys: Record<UserRoleFilter, string> = {
   staff: 'admin.users.filter.roleStaff',
-  any: 'admin.users.filter.roleAny',
-  ...(roleLabelKeys as Record<'admin' | 'curator' | 'transcriber' | 'citizen', string>),
+  ...(roleLabelKeys as Record<'admin' | 'curator' | 'transcriber', string>),
 };
 
 const statusFilterLabelKeys: Record<UserStatusFilter, string> = {
@@ -115,22 +107,22 @@ const addedFormat = new Intl.DateTimeFormat(lang === 'kn' ? 'kn-IN' : 'en-IN', {
 const isFiltered = query.trim() !== '' || hasExplicitRoleFilter || statusFilter !== 'any';
 
 function roleLabel(role: string): string {
-  return t(lang, roleLabelKeys[role] ?? 'admin.users.results.roleCitizen');
+  return roleLabelKeys[role] ? t(lang, roleLabelKeys[role]) : role;
 }
 
 function contactDisplay(row: UserSearchRow): string {
   if (row.status === 'erased') return t(lang, 'admin.users.results.noContact');
-  return [row.email, row.phone].filter(Boolean).join(' / ') || '—';
+  return row.email ?? '—';
 }
 
 function userIdentifier(row: UserSearchRow): string {
-  return row.email ?? row.phone ?? `#${row.id}`;
+  return row.email ?? `#${row.id}`;
 }
 
-/** The roles a row can be moved to: every staff role but its current one, then 'citizen' (remove staff access) if it is staff. */
+/** The roles a row can be moved to: every staff role but its current one, then 'remove' (delete the account). */
 function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
   const choices = STAFF_ROLES.filter((role) => role !== row.role).map((role) => ({ value: role as string, label: roleLabel(role) }));
-  if (row.role !== 'citizen') choices.push({ value: 'citizen', label: t(lang, 'admin.users.role.remove') });
+  choices.push({ value: 'remove', label: t(lang, 'admin.users.role.remove') });
   return choices;
 }
 ---
@@ -215,9 +207,7 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
       </form>
 
       {
-        needsQuery ? (
-          <p class="placeholder-note">{t(lang, 'admin.users.search.prompt')}</p>
-        ) : rows.length === 0 ? (
+        rows.length === 0 ? (
           <p class="placeholder-note">{t(lang, 'admin.users.search.noResults')}</p>
         ) : (
           <>
@@ -250,17 +240,6 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                     </summary>
 
                     <div class="user-panel">
-                      <dl class="user-facts">
-                        <div>
-                          <dt>{t(lang, 'admin.users.results.colWard')}</dt>
-                          <dd>{row.homeWardNameEn ?? t(lang, 'admin.users.results.noWard')}</dd>
-                        </div>
-                        <div>
-                          <dt>{t(lang, 'admin.users.results.colFlags')}</dt>
-                          <dd>{row.flagSubmissionCount}</dd>
-                        </div>
-                      </dl>
-
                       {row.id === selfId ? (
                         <p class="self-note">{t(lang, 'admin.users.list.selfNote')}</p>
                       ) : (
@@ -370,9 +349,6 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                 </li>
               ))}
             </ul>
-            {truncatedAt !== undefined && (
-              <p class="placeholder-note">{t(lang, 'admin.users.list.truncated', { count: String(truncatedAt) })}</p>
-            )}
           </>
         )
       }
@@ -612,7 +588,6 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
     color: var(--color-primary);
   }
 
-  .tag--citizen,
   .tag--active {
     background: transparent;
     padding-inline: 0;
@@ -642,27 +617,6 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
     }
   }
 
-  .user-facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-6);
-    margin: 0;
-    font-size: var(--text-sm);
-  }
-
-  .user-facts div {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  .user-facts dt {
-    color: var(--color-text-muted);
-  }
-
-  .user-facts dd {
-    margin: 0;
-    font-weight: 700;
-  }
 
   .self-note {
     margin: 0;

@@ -12,7 +12,8 @@ vi.mock('../../src/lib/translate-runtime', async (importOriginal) => {
 });
 
 import { translateFieldSoon } from '../../src/lib/translate-runtime';
-import { submitFlag, resolveFlag } from '../../src/lib/flags';
+import { submitPublicFlag, resolveFlag, type SubmitFlagInput } from '../../src/lib/flags';
+import { anonReporter } from '../support/reporter';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -31,12 +32,19 @@ const WARD_ID_B = 99312; // a SECOND ward — curators are city-wide, so the sam
 
 let candidateId: number;
 let candidateBId: number; // in WARD_ID_B
-let submitterAId: number;
-let submitterBId: number;
-let raceUserAId: number;
-let raceUserBId: number;
 // A REAL curator user, used by every curator ACCEPT below.
 let curatorUserId: number;
+
+/**
+ * One anonymous report from a brand-new reporter (fresh browser and network
+ * hashes), so two calls are two different people and no admission limit
+ * trips.
+ */
+async function report(input: SubmitFlagInput): Promise<{ flagItemId: number }> {
+  const result = await submitPublicFlag(anonReporter(), input);
+  expect(result.state).toBe('accepted');
+  return { flagItemId: result.flagItemId! };
+}
 
 function targetRefFor(fieldKey: string): string {
   return `candidate:${candidateId}:${fieldKey}`;
@@ -119,43 +127,19 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
     // A real curator user, with no ward assignment of any kind.
     const [curatorUser] = await db
       .insert(schema.users)
-      .values({ email: `flags-test-curator-${randomUUID()}@example.com`, homeWardId: WARD_ID, role: 'curator', status: 'active' })
+      .values({ email: `flags-test-curator-${randomUUID()}@example.com`, role: 'curator', status: 'active' })
       .returning();
     curatorUserId = curatorUser!.id;
-
-    const submitterA = await db
-      .insert(schema.users)
-      .values({ email: `flags-test-submitter-a-${randomUUID()}@example.com`, homeWardId: WARD_ID, role: 'citizen', status: 'active' })
-      .returning();
-    submitterAId = submitterA[0]!.id;
-
-    const submitterB = await db
-      .insert(schema.users)
-      .values({ email: `flags-test-submitter-b-${randomUUID()}@example.com`, homeWardId: WARD_ID, role: 'citizen', status: 'active' })
-      .returning();
-    submitterBId = submitterB[0]!.id;
-
-    const raceUserA = await db
-      .insert(schema.users)
-      .values({ email: `flags-test-race-a-${randomUUID()}@example.com`, homeWardId: WARD_ID, role: 'citizen', status: 'active' })
-      .returning();
-    raceUserAId = raceUserA[0]!.id;
-
-    const raceUserB = await db
-      .insert(schema.users)
-      .values({ email: `flags-test-race-b-${randomUUID()}@example.com`, homeWardId: WARD_ID, role: 'citizen', status: 'active' })
-      .returning();
-    raceUserBId = raceUserB[0]!.id;
   });
 
   afterAll(async () => {
     await client.end();
   });
 
-  it('two users flagging the SAME targetRef collapse onto ONE flag_item with TWO flag_submissions', async () => {
+  it('two reporters flagging the SAME targetRef collapse onto ONE flag_item with TWO flag_submissions', async () => {
     const targetRef = targetRefFor('cases');
 
-    const first = await submitFlag(submitterAId, {
+    const first = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -163,7 +147,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
       sourceUrl: 'https://example.org/fir-record',
     });
 
-    const second = await submitFlag(submitterBId, {
+    const second = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -183,13 +167,13 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
       .from(schema.flagSubmissions)
       .where(eq(schema.flagSubmissions.flagItemId, first.flagItemId));
     expect(submissions).toHaveLength(2);
-    expect(submissions.map((s) => s.userId).sort()).toEqual([submitterAId, submitterBId].sort());
+    expect(new Set(submissions.map((s) => s.browserHash)).size).toBe(2);
   });
 
   it('resolveFlag ACCEPT: publishes the fix as a structured, person-checked value AND marks the item accepted; both submitters see the same accepted status', async () => {
     const targetRef = targetRefFor('age');
 
-    const first = await submitFlag(submitterAId, {
+    const first = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -197,7 +181,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
       suggestedValue: '41',
       sourceUrl: 'https://example.org/age-source',
     });
-    await submitFlag(submitterBId, {
+    await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -238,13 +222,13 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('resolveFlag REJECT: marks the item rejected with a reason; no publish; both submitters see the same rejected+reason', async () => {
     const targetRef = targetRefFor('assets');
 
-    const first = await submitFlag(submitterAId, {
+    const first = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
       detail: 'Assets figure seems wrong.',
     });
-    await submitFlag(submitterBId, {
+    await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -285,7 +269,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('a NEW flag on a previously-REJECTED targetRef opens a fresh pending item (partial unique index on targetRef WHERE status=pending)', async () => {
     const targetRef = targetRefFor('education');
 
-    const original = await submitFlag(submitterAId, {
+    const original = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -297,7 +281,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
       reason: 'Checked, claim stands.',
     });
 
-    const fresh = await submitFlag(submitterBId, {
+    const fresh = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -326,7 +310,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
       .values({ wardId: WARD_ID, targetType: 'candidate_field', targetRef, status: 'pending' })
       .returning({ id: schema.flagItems.id });
 
-    const result = await submitFlag(raceUserAId, {
+    const result = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -339,17 +323,17 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
     expect(items).toHaveLength(1);
   });
 
-  it('race: two CONCURRENT submitFlag calls for a brand-new targetRef still collapse onto ONE item (23505 re-select path)', async () => {
+  it('race: two CONCURRENT submitPublicFlag calls for a brand-new targetRef still collapse onto ONE item (23505 re-select path)', async () => {
     const targetRef = await freshTargetRef();
 
     const [a, b] = await Promise.all([
-      submitFlag(raceUserAId, {
+      report({
         wardId: WARD_ID,
         targetType: 'candidate_field',
         targetRef,
         detail: 'First concurrent submitter.',
       }),
-      submitFlag(raceUserBId, {
+      report({
         wardId: WARD_ID,
         targetType: 'candidate_field',
         targetRef,
@@ -372,7 +356,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('flag -> reject -> flag -> reject (TWO full reject cycles on the same targetRef) does not 23505 (partial index fix)', async () => {
     const targetRef = await freshTargetRef();
 
-    const round1 = await submitFlag(submitterAId, {
+    const round1 = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -387,7 +371,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
     // unique index on (target_ref, status), this second reject would try
     // to insert a second (targetRef, 'rejected') row and hit an unhandled
     // 23505 — that's the bug this fix closes.
-    const round2 = await submitFlag(submitterBId, {
+    const round2 = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -414,7 +398,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('double resolveFlag ACCEPT on the same item: the second call throws and does NOT publish a second time', async () => {
     const targetRef = await freshTargetRef('cases');
 
-    const { flagItemId } = await submitFlag(submitterAId, {
+    const { flagItemId } = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -441,7 +425,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('resolveFlag on an already-rejected item throws and does not change state', async () => {
     const targetRef = await freshTargetRef();
 
-    const { flagItemId } = await submitFlag(submitterAId, {
+    const { flagItemId } = await report({
       wardId: WARD_ID,
       targetType: 'candidate_field',
       targetRef,
@@ -469,7 +453,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
     const targetRef = await freshTargetRef('education');
     const freshCandidateId = Number(targetRef.split(':')[1]);
 
-    const { flagItemId } = await submitFlag(submitterAId, {
+    const { flagItemId } = await report({
       targetType: 'candidate_field',
       targetRef,
       detail: 'Education needs updating.',
@@ -497,7 +481,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
     });
 
     // --- First accept: no row yet, so the English is new and translation fires once.
-    const first = await submitFlag(submitterAId, { targetType: 'candidate_field', targetRef, detail: 'Initial concern about this field.' });
+    const first = await report({ targetType: 'candidate_field', targetRef, detail: 'Initial concern about this field.' });
     vi.mocked(translateFieldSoon).mockClear();
     await resolveFlag({ userId: curatorUserId, role: 'curator' }, first.flagItemId, fixTo(null));
     expect(vi.mocked(translateFieldSoon)).toHaveBeenCalledTimes(1);
@@ -509,7 +493,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
 
     // --- Second accept: the qualification as stated repeats the level, so the
     // published English is still "Graduate" — nothing to translate again.
-    const second = await submitFlag(submitterBId, { targetType: 'candidate_field', targetRef, detail: 'The affidavit states the qualification too.' });
+    const second = await report({ targetType: 'candidate_field', targetRef, detail: 'The affidavit states the qualification too.' });
     vi.mocked(translateFieldSoon).mockClear();
     await resolveFlag({ userId: curatorUserId, role: 'curator' }, second.flagItemId, fixTo('Graduate'));
 
@@ -526,7 +510,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('resolveFlag ACCEPT with a ward fix moves the candidate, accepts the item and translates nothing', async () => {
     const targetRef = await freshTargetRef('ward');
     const freshCandidateId = Number(targetRef.split(':')[1]);
-    const { flagItemId } = await submitFlag(submitterAId, { targetType: 'candidate_field', targetRef, detail: 'This candidate is standing in ward B.' });
+    const { flagItemId } = await report({ targetType: 'candidate_field', targetRef, detail: 'This candidate is standing in ward B.' });
 
     vi.mocked(translateFieldSoon).mockClear();
     await resolveFlag({ userId: curatorUserId, role: 'curator' }, flagItemId, {
@@ -546,12 +530,12 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   // Final-review Fix 1 — the flag's ward is derived from its target; curators and admins resolve city-wide.
   // -------------------------------------------------------------------------
 
-  it('Fix 1(a): submitFlag DERIVES the ward from the target candidate, ignoring the client-supplied wardId', async () => {
+  it('Fix 1(a): submitPublicFlag DERIVES the ward from the target candidate, ignoring the client-supplied wardId', async () => {
     const targetRef = `candidate:${candidateBId}:cases`; // candidate B lives in WARD_ID_B
 
     // Client LIES about the ward (claims WARD_ID). The stored ward must be
     // the candidate's REAL ward.
-    const { flagItemId } = await submitFlag(submitterAId, {
+    const { flagItemId } = await report({
       wardId: WARD_ID, // wrong on purpose
       targetType: 'candidate_field',
       targetRef,
@@ -562,9 +546,9 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
     expect(item!.wardId).toBe(WARD_ID_B); // derived from candidate B, NOT the client's WARD_ID
   });
 
-  it('Fix 1(a): submitFlag rejects a candidate_field target for a candidate that does not exist', async () => {
+  it('Fix 1(a): submitPublicFlag rejects a candidate_field target for a candidate that does not exist', async () => {
     await expect(
-      submitFlag(submitterAId, {
+      submitPublicFlag(anonReporter(), {
         wardId: WARD_ID,
         targetType: 'candidate_field',
         targetRef: 'candidate:99999999:cases',
@@ -576,7 +560,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('a curator (city-wide, no ward assignment) CAN accept/publish a flag whose target candidate is in a different ward', async () => {
     const targetRef = `candidate:${candidateBId}:age`;
 
-    const { flagItemId } = await submitFlag(submitterAId, {
+    const { flagItemId } = await report({
       targetType: 'candidate_field',
       targetRef,
       detail: 'Age for a ward-B candidate.',
@@ -601,7 +585,7 @@ describe('flags.ts — deduped flag queue + transactional resolution (Task 31)',
   it('admin CAN accept a flag in any ward', async () => {
     const targetRef = `candidate:${candidateBId}:assets`;
 
-    const { flagItemId } = await submitFlag(submitterAId, {
+    const { flagItemId } = await report({
       targetType: 'candidate_field',
       targetRef,
       detail: 'Assets for a ward-B candidate, resolved by an admin.',

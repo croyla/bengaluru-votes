@@ -17,7 +17,7 @@ const client = postgres(process.env.DATABASE_URL, { max: 1 });
 const db = drizzle(client, { schema });
 
 // A distinctive fixture email (not a hardcoded numeric id, since `users.id`
-// is a serial — see votes.test.ts for the same convention) so this suite
+// is a serial — the convention every DB suite here follows) so this suite
 // never collides with another test file's user fixtures in the shared test DB.
 const EMAIL = 'session-lib-fixture@example.com';
 let userId: number;
@@ -25,7 +25,7 @@ let userId: number;
 async function resetUser(): Promise<void> {
   await db
     .update(schema.users)
-    .set({ status: 'active', role: 'citizen' })
+    .set({ status: 'active', role: 'transcriber' })
     .where(eq(schema.users.id, userId));
 }
 
@@ -35,10 +35,10 @@ describe('signed sliding sessions (src/lib/session.ts)', () => {
 
     const [user] = await db
       .insert(schema.users)
-      .values({ email: EMAIL, role: 'citizen', status: 'active' })
+      .values({ email: EMAIL, role: 'transcriber', status: 'active' })
       .onConflictDoUpdate({
         target: schema.users.email,
-        set: { role: 'citizen', status: 'active' },
+        set: { role: 'transcriber', status: 'active' },
       })
       .returning({ id: schema.users.id });
     userId = user!.id;
@@ -85,7 +85,7 @@ describe('signed sliding sessions (src/lib/session.ts)', () => {
   it('round trip: create -> read -> correct user/role', async () => {
     const { cookieValue } = await createSession(userId);
     const result = await readSession(cookieValue);
-    expect(result).toEqual({ userId, role: 'citizen' });
+    expect(result).toEqual({ userId, role: 'transcriber' });
   });
 
   it('round trip reflects the user\'s current role', async () => {
@@ -177,7 +177,7 @@ describe('signed sliding sessions (src/lib/session.ts)', () => {
     await db.update(schema.sessions).set({ expiresAt: agedExpiry }).where(eq(schema.sessions.id, id));
 
     const result = await readSession(cookieValue);
-    expect(result).toEqual({ userId, role: 'citizen' });
+    expect(result).toEqual({ userId, role: 'transcriber' });
 
     const [after] = await db.select().from(schema.sessions).where(eq(schema.sessions.id, id));
     const deltaMs = after!.expiresAt.getTime() - Date.now();

@@ -273,18 +273,16 @@ describe('Ward result page (/ward/{id}, /kn/ward/{id})', () => {
     });
   });
 
-  describe('register-for-updates slot (design-system.md §11, cache invariant)', () => {
-    it.each(['en', 'kn'] as const)(
-      '%s: renders the anonymous "Register for updates" control with data-register-slot/data-ward-id',
-      async (lang) => {
-        const res = await renderWard(lang, WARD.id);
-        const html = normalize(await res.text());
-
-        expect(html).toContain(t(lang, 'common.registerForUpdates'));
-        expect(html).toMatch(new RegExp(`data-register-slot[^>]*data-ward-id="${WARD.id}"|data-ward-id="${WARD.id}"[^>]*data-register-slot`));
-        expect(html).toContain(`href="${localePath(lang, '/login')}"`);
-      },
-    );
+  describe('no registration (cache invariant)', () => {
+    it.each(['en', 'kn'] as const)('%s: renders no register slot and no Register/Login modal, but keeps the flag modal', async (lang) => {
+      const res = await renderWard(lang, WARD.id);
+      expect(res.status).toBe(200);
+      const html = normalize(await res.text());
+      expect(html).not.toContain('data-register-slot');
+      expect(html).not.toContain('Register for updates');
+      expect(html).not.toContain('data-register-login-modal');
+      expect(html).toContain('data-flag-modal');
+    });
 
     it('server markup is byte-identical whether or not the request carries a session cookie (cache invariant)', async () => {
       const noCookie = normalize(await (await renderWard('en', WARD.id)).text());
@@ -292,27 +290,6 @@ describe('Ward result page (/ward/{id}, /kn/ward/{id})', () => {
         await (await renderWard('en', WARD.id, { cookie: 'session=some-signed-in-users-session-id' })).text(),
       );
       expect(withCookie).toBe(noCookie);
-    });
-
-    describe('temporary password mode', () => {
-      beforeEach(() => {
-        process.env.MASTER_PASSWORD = 'ward-test-master-password-0001';
-      });
-
-      afterEach(() => {
-        delete process.env.MASTER_PASSWORD;
-      });
-
-      it.each(['en', 'kn'] as const)('%s: renders no register slot and no Register/Login modal', async (lang) => {
-        const res = await renderWard(lang, WARD.id);
-        expect(res.status).toBe(200);
-        const html = normalize(await res.text());
-        expect(html).not.toContain('data-register-slot');
-        expect(html).not.toContain(t(lang, 'common.registerForUpdates'));
-        expect(html).not.toContain('data-register-login-modal');
-        // The flag modal stays: staff still flag, and citizens are sent to /login.
-        expect(html).toContain('data-flag-modal');
-      });
     });
   });
 
@@ -383,20 +360,20 @@ describe('Ward result page (/ward/{id}, /kn/ward/{id})', () => {
   });
 
   describe('WardMap island + no-JS fallback', () => {
-    it('emits its own WardMap island script, plus Base.astro\'s global Register/Login, Flag, inline issue voting, MeSlot, ?src attribution, and Place JSON-LD scripts (Tasks 27/28/32/33/49/56) — no others', async () => {
+    it('emits its own WardMap island script, plus Base.astro\'s global Flag, inline issue voting, ?src attribution, and Place JSON-LD scripts (Tasks 28/32/49/56) — no others', async () => {
       const html = normalize(await (await renderWard('en', WARD.id)).text());
       const scriptOpenTags = html.match(/<script\b[^>]*>/g) ?? [];
-      // Ward map and inline voting, three global modules, attribution, and JSON-LD.
-      expect(scriptOpenTags).toHaveLength(7);
+      // Ward map, inline voting and the global Flag module; attribution and JSON-LD inline.
+      expect(scriptOpenTags).toHaveLength(5);
       const moduleScripts = scriptOpenTags.filter((tag) => tag.includes('type="module"'));
       const inlineScripts = scriptOpenTags.filter((tag) => !tag.includes('type="module"'));
-      expect(moduleScripts).toHaveLength(5);
+      expect(moduleScripts).toHaveLength(3);
       expect(inlineScripts).toHaveLength(2);
       expect(html).toMatch(/Ward\.astro\?astro&type=script/);
-      expect(html).toMatch(/RegisterLoginModal\.astro\?astro&type=script/);
       expect(html).toMatch(/FlagModal\.astro\?astro&type=script/);
       expect(html).toMatch(/IssueVote\.astro\?astro&type=script/);
-      expect(html).toMatch(/Base\.astro\?astro&type=script/);
+      expect(html).not.toMatch(/RegisterLoginModal\.astro\?astro&type=script/);
+      expect(html).not.toMatch(/Base\.astro\?astro&type=script/);
       expect(html).toMatch(/bv_src/);
       expect(html).toMatch(/"@type":"AdministrativeArea"/);
     });

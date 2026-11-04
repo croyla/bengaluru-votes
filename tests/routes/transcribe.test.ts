@@ -72,7 +72,7 @@ async function run(component: unknown, path: string, opts: { auth?: Auth; form?:
 const start = (auth?: Auth, form?: FormData) => run(StartRoute, '/transcribe', { auth, form });
 const reading = (id: number | string, auth?: Auth, form?: FormData) => run(ReadingRoute, `/transcribe/${id}`, { auth, form, params: { id: String(id) } });
 
-async function person(role: 'transcriber' | 'admin' | 'curator' | 'citizen'): Promise<Auth> {
+async function person(role: 'transcriber' | 'admin' | 'curator'): Promise<Auth> {
   const [row] = await db
     .insert(schema.users)
     .values({ email: `${EMAIL_PREFIX}${randomUUID()}@example.com`, role })
@@ -191,7 +191,7 @@ describe('who may enter', () => {
     expect(res.headers.get('location')).toBe('/login?next=%2Ftranscribe');
   });
 
-  it.each(['citizen', 'curator'] as const)('refuses a %s', async (role) => {
+  it.each(['curator'] as const)('refuses a %s', async (role) => {
     expect((await start(await person(role))).status).toBe(403);
   });
 

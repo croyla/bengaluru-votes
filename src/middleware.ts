@@ -20,30 +20,22 @@
  * `X-Robots-Tag: noindex`.
  *
  * ROUTE CLASSES:
- *  - PUBLIC: everything NOT under /account, /curator, /admin, /api, /login,
- *    /media. Never blocked here; no guard, no CSRF check. (`/partner/*` is
+ *  - PUBLIC: everything NOT under /curator, /admin, /transcribe, /api,
+ *    /login, /media. Never blocked here; no guard, no CSRF check. (`/partner/*` is
  *    public in this sense — anonymous, no session read — but still gets the
  *    SEO noindex header below; those are independent concerns.)
- *  - /account/*, /curator/*, /admin/*: authenticated form routes. GET (and
+ *  - /curator/*, /admin/*, /transcribe/*: authenticated staff form routes. GET (and
  *    every other method) requires a session; wrong role -> 403; no session
  *    -> redirect to `/login?next=<validated relative path>`. Unsafe methods
  *    additionally require a valid synchronizer CSRF token (src/lib/csrf.ts).
  *    There is no per-ward scope: curators and admins are both city-wide
  *    (decided 2026-08-15), so the role check here is the whole answer.
- *  - /api/webhooks/*: exempt from the Origin/Sec-Fetch-Site check (no
- *    session, no CSRF token — vendor POSTs are signature-verified instead,
- *    Task 53) and from every route guard above.
- *  - /api/otp/*: NOT exempt from the Origin/Sec-Fetch-Site check (still
- *    enforced), but exempt from the synchronizer-token requirement (no
- *    session exists yet to bind one to).
- *    TEMPORARY: while MASTER_PASSWORD is set (src/lib/master-login.ts)
- *    this whole class answers 404 — sign-in is the password form on /login.
- *  - every other /api/*: Origin/Sec-Fetch-Site check applies; no
+ *  - /api/*: Origin/Sec-Fetch-Site check applies; no
  *    synchronizer token requirement (JSON APIs rely on Origin check +
  *    SameSite cookies + their own session check, not a form-embedded
  *    token — Task 31/33).
  *
- * UNSAFE METHODS (POST/PUT/DELETE/PATCH), non-webhook: rejected 403 unless
+ * UNSAFE METHODS (POST/PUT/DELETE/PATCH): rejected 403 unless
  * `Sec-Fetch-Site` is `same-origin`/`none`, OR (when that header is absent)
  * `Origin` equals this deployment's own origin (`SITE_ORIGIN`/`Astro.site`).
  * If NEITHER header is present the request is rejected — modern browsers
@@ -59,8 +51,7 @@ import { readSession, SESSION_COOKIE, type Role } from './lib/session';
 import { issueCsrfToken, checkCsrfToken, CSRF_FIELD_NAME } from './lib/csrf';
 import { isSameOriginRelative } from './lib/authz';
 import { buildCsp } from './lib/csp';
-import { captureException } from './lib/logger';
-import { masterLoginEnabled } from './lib/master-login';
+import { assertMasterPasswordConfig } from './lib/master-login';
 
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
@@ -76,8 +67,8 @@ function isUnderAny(pathname: string, prefixes: string[]): boolean {
 /**
  * Strips a leading `/kn` locale prefix so prefix-based route-class checks
  * (route guards, CSRF form-route check, noindex) apply identically to a
- * `/kn/…` twin as to its English original — e.g. `/kn/account/submissions`
- * must be guarded exactly like `/account/submissions`. Only used for prefix
+ * `/kn/…` twin as to its English original — e.g. `/kn/curator` must be
+ * guarded exactly like `/curator`. Only used for prefix
  * MATCHING; the raw `pathname` is still used for `locals.lang` detection,
  * the actual request/response, and redirect targets (Task 48 review,
  * Task 26 bug: the /kn/ twin of an authenticated route was reachable
@@ -87,8 +78,8 @@ function stripLocalePrefix(pathname: string): string {
   return pathname.replace(/^\/kn(?=\/|$)/, '') || '/';
 }
 
-const AUTH_FORM_PREFIXES = ['/account', '/curator', '/admin', '/transcribe'];
-const NOINDEX_PREFIXES = ['/partner', '/account', '/curator', '/admin', '/transcribe', '/login'];
+const AUTH_FORM_PREFIXES = ['/curator', '/admin', '/transcribe'];
+const NOINDEX_PREFIXES = ['/partner', '/curator', '/admin', '/transcribe', '/login'];
 
 function forbidden(): Response {
   return new Response('Forbidden', { status: 403 });
@@ -176,40 +167,23 @@ export const onRequest = defineMiddleware(async (context, next) => {
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   };
 
-  // TEMPORARY (until email works for OTP — src/lib/master-login.ts):
-  // evaluated on EVERY request so a too-short MASTER_PASSWORD throws at
-  // once, health check included, instead of running with a guessable
-  // password. In password mode the OTP endpoints do not exist.
-  // A misconfigured value is reported to Sentry before the rethrow, since
-  // this call sits outside the try/catch around `next()` below.
-  let passwordMode: boolean;
-  try {
-    passwordMode = masterLoginEnabled();
-  } catch (err) {
-    captureException(err);
-    throw err;
-  }
-  if (passwordMode && isUnder(pathname, '/api/otp')) {
-    return respond(new Response('Not found', { status: 404 }));
-  }
-
-  const isWebhook = isUnder(pathname, '/api/webhooks');
+  // Evaluated on EVERY request so a too-short MASTER_PASSWORD
+  // (src/lib/master-login.ts) throws at once, health check included,
+  // instead of running with a guessable password.
+  assertMasterPasswordConfig();
 
   // --- unsafe-method Origin/Sec-Fetch-Site check --------------------------
-  if (UNSAFE_METHODS.has(method) && !isWebhook) {
+  if (UNSAFE_METHODS.has(method)) {
     const siteOrigin = (site ?? new URL(process.env.SITE_ORIGIN ?? 'https://bengaluruvotes.opencity.in')).origin;
     if (!passesOriginCheck(request, siteOrigin)) {
       return respond(forbidden());
     }
   }
 
-  // --- route guards: /account/*, /curator/*, /admin/* (and their /kn/
+  // --- route guards: /curator/*, /admin/*, /transcribe/* (and their /kn/
   // twins, via guardPath) ---------------------------------------------------
   const role: Role | undefined = session?.role;
 
-  if (isUnder(guardPath, '/account')) {
-    if (!session) return respond(redirectToLogin(pathname + url.search));
-  }
   if (isUnder(guardPath, '/curator')) {
     if (!session) return respond(redirectToLogin(pathname + url.search));
     if (role !== 'curator' && role !== 'admin') return respond(forbidden());
@@ -238,17 +212,5 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  // Task 63: an unhandled error from downstream (a page/route handler
-  // throwing rather than returning a Response) is reported to Sentry
-  // (scrubbed, env-gated — src/lib/logger.ts) before it's rethrown, so
-  // behavior is otherwise unchanged: no error is swallowed here, and this
-  // is the one Astro middleware boundary every request passes through.
-  let response: Response;
-  try {
-    response = await next();
-  } catch (err) {
-    captureException(err);
-    throw err;
-  }
-  return respond(response);
+  return respond(await next());
 });

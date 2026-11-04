@@ -10,7 +10,7 @@ This serves a real election. Demo/fixture data is deliberately unmistakable as f
 
 ## The docs
 
-- `docs/architecture.md` — the technical design: what runs where, caching, data model, API and auth, SEO, bilingual text, jobs, security, deployment. §15 lists the **dormant code slated for removal** (registration, OTP, campaign sends, webhooks, partner/EOI, Sentry, …); nothing in it is a feature. §16 is external dependencies and known gaps. Section numbers are load-bearing: code comments cite `architecture §N`.
+- `docs/architecture.md` — the technical design: what runs where, caching, data model, API and auth, SEO, bilingual text, jobs, security, deployment. §15 lists the **dormant code slated for removal** (partner/EOI, EC-link fetch, stances and photos, orphan pages, …); nothing in it is a feature. §16 is external dependencies and known gaps. Section numbers are load-bearing: code comments cite `architecture §N`.
 - `docs/design-system.md` — visual language, neutrality rules, components and the UI completion checklist.
 - `docs/gcp.md` — Google Cloud provisioning (Geocoding, Maps JS, Places, reCAPTCHA, GA4): what to create in which console and which env var it becomes. `deploy/runbook.md`'s env var table is the authority on what each variable does at runtime.
 
@@ -36,7 +36,7 @@ Single test file / single test:
 
 ```sh
 npx vitest run tests/routes/ward.test.ts
-npx vitest run tests/unit/otp.test.ts -t 'name of the case'
+npx vitest run tests/unit/master-login.test.ts -t 'name of the case'
 ```
 
 Seeds (order matters — `seed:dev` depends on wards existing):
@@ -76,20 +76,19 @@ docker compose -f deploy/compose.local.yml run --rm --no-deps --build \
   -e SITE_ORIGIN=https://bengaluruvotes.opencity.in \
   app sh -c '
     export DATABASE_URL="${DATABASE_URL%/gba}/bv_test"
-    unset MASTER_PASSWORD SENDS_DISABLED ALLOW_INSECURE_LOCAL_RECAPTCHA OTP_TEST_SINK \
+    unset MASTER_PASSWORD ALLOW_INSECURE_LOCAL_RECAPTCHA \
       RECAPTCHA_SITE_KEY RECAPTCHA_SECRET_KEY MAPS_ENABLED GOOGLE_MAPS_BROWSER_KEY \
-      GOOGLE_MAPS_MAP_ID GOOGLE_GEOCODING_API_KEY GOOGLE_SEARCH_API_KEY GOOGLE_SEARCH_CX
+      GOOGLE_MAPS_MAP_ID GOOGLE_GEOCODING_API_KEY
     case "$DATABASE_URL" in */bv_test) npm test ;; *) echo "not bv_test; refusing"; exit 2 ;; esac'
 ```
 
 For a single test file or test case, replace `npm test` with the relevant `npx vitest run ...` command from above. Migrations run automatically — each DB-backed test file calls `migrate()` in its own `beforeAll`. Never point this command at the app's `gba` database: it rewrites the app container's own `DATABASE_URL` to `bv_test` and refuses to run if that did not take, so no credential is typed on the command line.
 
-The suite expects a clean environment, and the local image is not one. Every override above is there because a test fails without it (verified 2026-10-14, all 1,709 tests passing with them):
+The suite expects a clean environment, and the local image is not one. Every override above is there because a test fails without it:
 
 - `SITE_ORIGIN` set to production: the candidate JSON-LD tests.
-- `MASTER_PASSWORD` unset: the `/api/otp` middleware test, which otherwise sees password mode.
-- `SENDS_DISABLED` unset: the send and campaign tests (`send-to-user`, `calendar`) mock the transports and expect them to be called; with the local guard on, nothing is dispatched.
-- The vendor keys from `deploy/.env.local` unset (reCAPTCHA, Maps, geocoding, search): the app service loads that file, and a reCAPTCHA site key adds a script tag to the ward page that the ward route test counts. They are unset as a group so a key added to that file later cannot leak into a run. `ALLOW_INSECURE_LOCAL_RECAPTCHA` and `OTP_TEST_SINK` are local-only switches and go with them.
+- `MASTER_PASSWORD` unset: the sign-in tests set their own value and expect it absent otherwise.
+- The vendor keys from `deploy/.env.local` unset (reCAPTCHA, Maps, geocoding): the app service loads that file, and a reCAPTCHA site key adds a script tag to the ward page that the ward route test counts. They are unset as a group so a key added to that file later cannot leak into a run. `ALLOW_INSECURE_LOCAL_RECAPTCHA` is a local-only switch and goes with them.
 
 If a run fails only in these areas, check the environment before the code. A variable added to `compose.local.yml` or `deploy/.env.local` belongs in the `unset` list too.
 
@@ -121,7 +120,7 @@ Adding a page means touching three files (feature component + two shims). API ro
 
 ### `src/middleware.ts` — the single enforcement point
 
-Session, CSRF, role authorization, CSP, and cache-safety all run here, before any route. Read its docstring before changing anything security-adjacent; it defines the route classes (public / `/account`+`/curator`+`/admin` / `/api/webhooks` / `/api/otp` / other `/api`) and their differing rules.
+Session, CSRF, role authorization, CSP, and cache-safety all run here, before any route. Read its docstring before changing anything security-adjacent; it defines the route classes (public / `/curator`+`/admin`+`/transcribe` / `/api`) and their differing rules.
 
 Two invariants worth stating outright:
 
@@ -130,9 +129,9 @@ Two invariants worth stating outright:
 
 ### The caching invariant
 
-**Public page HTML never varies by session.** nginx strips the `Cookie` header before proxying public routes, so the app cannot see a session there even if it wanted to. Logged-in users get the same cached anonymous markup; account and registration state is swapped client-side from `GET /api/me`; anonymous voting state comes from `GET /api/issue-votes` using an opaque HttpOnly receipt cookie. The cache key ignores the query string entirely.
+**Public page HTML never varies by session.** nginx strips the `Cookie` header before proxying public routes, so the app cannot see a session there even if it wanted to. Signed-in staff get the same cached anonymous markup; anonymous voting state comes from `GET /api/issue-votes` using an opaque HttpOnly receipt cookie. The cache key ignores the query string entirely.
 
-Anything that would make a public page depend on the viewer breaks this. Personalize through `/api/me` instead.
+Anything that would make a public page depend on the viewer breaks this. Put per-visitor state behind an uncached API instead.
 
 ### Islands
 
@@ -174,13 +173,13 @@ Every model call is paid (about $0.20 per affidavit on Opus 5.5). The local `ext
 
 ### Contribution flows
 
-**Keep anonymous voting.** Issue voting requires no account or registered home ward: a visitor chooses exactly three issues in one ward, with one immutable ballot per browser receipt and results revealed after voting. Flagging candidate-field errors also requires no account and works across any ward. It opens directly in the existing modal, with CAPTCHA, browser/account/network limits and duplicate suppression. Reports remain private and only curators publish corrections. Both actions show enabled buttons to anonymous users.
+**Keep anonymous voting.** Issue voting requires no account: a visitor chooses exactly three issues in one ward, with one immutable ballot per browser receipt and results revealed after voting. Flagging candidate-field errors also requires no account and works across any ward. It opens directly in the existing modal, with CAPTCHA, browser/network limits and duplicate suppression. Reports are anonymous only: no submission is linked to an account, even a signed-in staff member's. Reports remain private and only curators publish corrections. Both actions show enabled buttons to anonymous users.
 
 Flag is a **modal** that overlays without changing the URL. Staff sign in at `/login`; citizens never sign in. **Issue voting is inline** in the ward’s “What matters most in this ward” section: show the choices, selection count, submission, and feedback in place, without a popup. Keep anonymous voting and the exactly-three limit. After voting, show results immediately in place; also show them automatically on return visits with a valid receipt, without requiring a “Show results” click. In the voted state, replace the voting instructions with a results subtitle, show the receipt’s three choices, then show only the top five overall issues with votes. Keep the original instructions for visitors who have not voted. Every other screen is a distinct deep-linkable URL.
 
 ### Roles
 
-Anonymous citizen (no account; all citizen traffic) · Transcriber · Data curator (**city-wide**, no ward or zone assignment) · Admin (city-wide). `roleEnum` in the schema still has a `citizen` value for the dormant registration code (`architecture.md` §15), but no citizen accounts exist; `src/middleware.ts` is the authority on what each can do. There is no written permissions matrix at present.
+Anonymous citizen (no account; all citizen traffic) · Transcriber · Data curator (**city-wide**, no ward or zone assignment) · Admin (city-wide). `roleEnum` in the schema (`transcriber | curator | admin`) is the authority on what exists: there are no citizen accounts. `src/middleware.ts` is the authority on what each can do. Removing someone's staff access at `/admin/users` deletes the account (or erases it when transcription history points at it). There is no written permissions matrix at present.
 
 **Transcriber** has its own area, `/transcribe` (built 2026-10-13; `src/lib/transcribe.ts`). The middleware admits a transcriber or an admin to it; a curator gets 403. Beyond that it is authorized by assignment rather than by role: every read and write checks "does an open, unexpired assignment with this id belong to this caller", and anything else is a 404, for an admin too. There is one Start control and no list: do not add search, filters or any way to choose an affidavit. A hold lasts 10 minutes. **Admins** also own `/admin/affidavits`: bulk upload, the needs-matching list and the failed list. Curators work the same needs-matching list at `/curator/matching`; uploading, retrying and discarding are admin-only.
 
@@ -190,17 +189,16 @@ Anonymous citizen (no account; all citizen traffic) · Transcriber · Data curat
 - **Address lookup has no fallback.** Pincode lookup was removed 2026-08-14 (`src/pages/api/ward-lookup.ts` header): the table behind it never advanced past a 12-row placeholder, so it told citizens to try something that could not work. Google geocoding is the *only* path from a typed address to a ward — exhausting `GEOCODE_DAILY_BUDGET` (default 2000/day, deliberately unchanged) or a Google outage takes that mode down, and the citizen sees an explicit "try again shortly" message. There is no browsable ward list to fall back to. The endpoint's **second input mode**, `{lat, lng}` from the home page's "use my current location" control, is the one path that survives such an outage: `lookupWardByPoint` goes straight to point-in-polygon, calling nothing and spending nothing. Don't route it through the geocoder or give it a cache row — the citizen's position is used once and dropped.
 - **The ward map (Google Maps JS API, `src/islands/WardMap.ts`) needs three env vars to render at all**, not one: `MAPS_ENABLED` exactly `'true'` *and* a non-empty `GOOGLE_MAPS_BROWSER_KEY` *and* a non-empty `GOOGLE_MAPS_MAP_ID` (`src/lib/maps-config.ts`'s `mapsConfig().enabled`). Miss any one of the three and the map silently doesn't mount — `Ward.astro` renders the server-side fallback text instead, with no error anywhere. The same key also gates Places Autocomplete on the home-page ward-lookup form.
 - **`/data/gba.geojson` is not in `public/`.** Production serves it from the nginx static volume, populated by the `static-init` one-shot, which **does not re-run** on `up -d` once it has succeeded — stale CSS/JS after a deploy usually means it needs `docker compose run --rm static-init`.
-- Unset vendor keys (`GOOGLE_*`, `ANTHROPIC_API_KEY`, `RECAPTCHA_*`, and the dormant `SENDGRID_*`, `TWILIO_*`, `SENTRY_DSN`) each degrade to a documented no-op rather than an error. `deploy/runbook.md` has the exhaustive table with what each one's absence costs.
+- Unset vendor keys (`GOOGLE_*`, `ANTHROPIC_API_KEY`, `RECAPTCHA_*`) each degrade to a documented no-op rather than an error. `deploy/runbook.md` has the exhaustive table with what each one's absence costs.
 - **No off-box backup exists.** The nightly `scripts/backup.sh` cron fails every night by design until a restic target is chosen (`architecture.md` §10, §16). Losing the box's disk loses everything. Don't read the working backup *mechanism* as a working backup.
 
 ## Fixed decisions (don't relitigate without asking)
 
-- **Auth:** only staff (admin, curator, transcriber) sign in; citizens are anonymous and never register. No 2FA, no sign-in links. **Today `MASTER_PASSWORD` turns `/login` into a shared-password form** that signs in as any existing staff account; staff sign-in is being reworked to per-staff passwords in a separate change (`docs/architecture.md` §4, §7). Sessions are a 1-hour sliding idle timeout for every role (`src/lib/session.ts`). `npm run seed:admin` bootstraps the first admin. The email/WhatsApp OTP and registration code is dormant (§15), not a feature.
+- **Auth:** only staff (admin, curator, transcriber) sign in; citizens are anonymous and never register. No 2FA, no sign-in links, no OTP, email or WhatsApp. **`/login` is a shared-password form**: an existing active staff account's email plus `MASTER_PASSWORD` (unset means nobody can sign in); staff sign-in is being reworked to per-staff passwords in a separate change (`docs/architecture.md` §4, §7). Sessions are a 1-hour sliding idle timeout for every role (`src/lib/session.ts`). `npm run seed:admin` bootstraps the first admin.
 - **Curator publish:** trusted; immediate, no approval gate.
 - **Bilingual:** EN at root, KN under `/kn/`, each with its own URL.
 - **Deployment:** one Hostinger VPS (Mumbai, 4 vCPU / 16 GB) runs production Compose, from `/root/src/bengaluru-votes-production`. The staging site/stack was retired on 2026-09-18 and removed from the repo on 2026-10-13; production is the only environment. **There is no registry**: images are built on the box. CI/CD returned 2026-11-04: PRs must pass the `test` check, and every push to `main` deploys to production automatically (`.github/workflows/deploy.yml`, secrets from the GitHub `production` environment). “Deploy” means production; there is no staging step. `deploy/runbook.md` ("Deploying") is the procedure, and `.claude/skills/deploy-vps/SKILL.md` is a step-by-step version any agent can read; `architecture.md` §14.3/§14.4 is the design. Moved off the never-provisioned DigitalOcean Droplet on 2026-08-13.
 - **Consequence worth holding onto:** a merge to `main` deploys production with no approval step. The `test` check (typecheck, translation staleness, build, Vitest, Playwright smoke) is the only gate.
-- **`SENDS_DISABLED` is a local-only guard:** the local stack sets it so nothing there can message a real person. Never set it on production.
 
 ## Agent sessions and git workflow
 
@@ -244,7 +242,7 @@ After any UI change, use the `agent-browser` CLI to inspect the live page at des
 
 **Candidate identity and photos:** Use the report-card full-name and party fields, including their Kannada translations, everywhere a candidate identity is displayed or searched. Do not add separate Kannada name/party inputs. The candidate editor has no election-status or affidavit-upload sections, for either curators or admins. Reject direct status/upload submissions there. Use one bottom confirmation and Save and publish action for changed report-card fields and ward changes together; never mark unchanged fields as checked. Do not offer candidate photo uploads: photos are not expected. Preserve existing translations when migrating legacy data.
 
-**Anonymous candidate reports (2026-11-02):** Keep reporting free of login, OTP and contact requirements. Use layered CAPTCHA, atomic rate limits, duplicate suppression and per-submission spam controls. Counts are submissions, not verified people or evidence. Never publish automatically or close legitimate reports merely because another submission on the same field is spam. Anonymous visitors receive confirmation only; signed-in reports retain account history. Abuse metadata cleanup runs independently of general retention. See `docs/architecture.md` §6 (Candidate flags), §7 (Anonymous candidate reports), §13 (accepted limitations) and `deploy/runbook.md`.
+**Anonymous candidate reports (2026-11-02):** Keep reporting free of login and contact requirements. Use layered CAPTCHA, atomic rate limits, duplicate suppression and per-submission spam controls. Counts are submissions, not verified people or evidence. Never publish automatically or close legitimate reports merely because another submission on the same field is spam. Reporters receive confirmation only; reports are never linked to an account (2026-11-04). Abuse metadata cleanup runs daily (`jobs/flag-cleanup.ts`). See `docs/architecture.md` §6 (Candidate flags), §7 (Anonymous candidate reports), §13 (accepted limitations) and `deploy/runbook.md`.
 
 **Transcriber confirmation and timeout (2026-11-02):** Use one “I checked this against the affidavit” checkbox for the entire form. Require it on the server before publishing all fields together. Each assignment lasts 10 minutes, then becomes available automatically; expired submissions cannot publish.
 

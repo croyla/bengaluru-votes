@@ -15,7 +15,7 @@ import type { APIRoute } from 'astro';
 
 const SITE_ORIGIN = process.env.SITE_ORIGIN ?? 'https://bengaluruvotes.opencity.in';
 
-const DISALLOWED_PREFIXES = ['/account/', '/curator/', '/admin/', '/partner/', '/api/'];
+const DISALLOWED_PREFIXES = ['/curator/', '/admin/', '/transcribe/', '/partner/', '/api/'];
 
 export const GET: APIRoute = () => {
   const lines = [

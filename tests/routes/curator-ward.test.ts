@@ -145,7 +145,7 @@ async function sessionFor(userId: number): Promise<{ cookieValue: string; token:
   return { cookieValue, token: issueCsrfToken(id) };
 }
 
-async function upsertUser(email: string, role: 'citizen' | 'curator' | 'admin'): Promise<number> {
+async function upsertUser(email: string, role: 'transcriber' | 'curator' | 'admin'): Promise<number> {
   const [row] = await db
     .insert(schema.users)
     .values({ email, role, status: 'active' })
@@ -183,14 +183,6 @@ async function resetFixtures(): Promise<void> {
   }
   await db.delete(schema.candidates).where(inArray(schema.candidates.wardId, ALL_WARDS.map((w) => w.id)));
 
-  const issueRows = await db
-    .select({ id: schema.wardIssues.id })
-    .from(schema.wardIssues)
-    .where(inArray(schema.wardIssues.wardId, ALL_WARDS.map((w) => w.id)));
-  const issueIds = issueRows.map((r) => r.id);
-  if (issueIds.length > 0) {
-    await db.delete(schema.issueVoteSelections).where(inArray(schema.issueVoteSelections.wardIssueId, issueIds));
-  }
   await db.delete(schema.wardIssues).where(inArray(schema.wardIssues.wardId, ALL_WARDS.map((w) => w.id)));
   if (typeof curatorId === 'number') {
     await db.delete(schema.sessions).where(eq(schema.sessions.userId, curatorId));

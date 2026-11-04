@@ -113,6 +113,13 @@
       "when": 1793600000000,
       "tag": "0015_anonymous_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793700000000,
+      "tag": "0016_remove_messaging_and_registration",
+      "breakpoints": true
     }
   ]
 }

@@ -4,7 +4,7 @@
  * — design-system §4.3/§7.12.
  * Lists every candidate standing in the ward — including withdrawn/
  * scrutiny-rejected ones, each with its lifecycle status shown — plus a
- * Compare entry point and the register-for-updates slot.
+ * Compare entry point.
  *
  * Existence check lives in the route twins (src/pages/ward/[id]/candidates.astro,
  * src/pages/kn/ward/[id]/candidates.astro), not here — same pattern as
@@ -31,27 +31,15 @@
  * common case before the nomination window) renders EmptyState at HTTP
  * 200 — NOT 404 — with the "Candidate nominations open on {date}…"
  * copy (falling back to a date-less "the notification date" phrasing
- * when `app_settings.notification_date` isn't set yet) plus the
- * register-for-updates control folded into the empty state itself. The
+ * when `app_settings.notification_date` isn't set yet). The
  * URL is shareable and accumulates authority regardless of whether
  * candidates have been published yet (architecture §8) — the ward exists,
  * there's just nothing to list.
- *
- * REGISTER-FOR-UPDATES SLOT: exactly ONE `[data-register-slot]` element
- * ever renders per response — inside the empty state when there are no
- * candidates, or in its own section at the bottom of the list otherwise —
- * because these two branches are mutually exclusive and Task 28's MeSlot
- * island (src/islands/MeSlot.ts) swaps only the FIRST such element it
- * finds (`querySelector`, not `querySelectorAll`). Always the full
- * anonymous-enabled markup (design-system §11 cache safety; dormant,
- * architecture §15), identical for every
- * visitor — the auth gate/personalization happens client-side.
  *
  * CACHE-SAFETY (architecture §5): this component never reads cookies or
  * session — the page is identical for every visitor.
  */
 import Base from '../../layouts/Base.astro';
-import Button from '../../components/Button.astro';
 import EmptyState from '../../components/EmptyState.astro';
 import CandidateRow from '../../components/CandidateRow.astro';
 import type { CandidateRowCandidate } from '../../components/CandidateRow.astro';
@@ -61,10 +49,7 @@ import { candidateIdentitySelection } from '../../lib/candidate-identity';
 import { wards, candidates, media } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { getKnownSetting } from '../../lib/settings';
-import { masterLoginEnabled } from '../../lib/master-login';
 
-// TEMPORARY (until email works for OTP): no register-for-updates slot in password mode.
-const passwordMode = masterLoginEnabled();
 
 interface Props {
   lang: Lang;
@@ -130,20 +115,7 @@ const description = ward
         </header>
 
         {sortedCandidates.length === 0 ? (
-          <EmptyState fact={emptyFact}>
-            {!passwordMode && (
-              <Button
-                variant="primary"
-                href={localePath(lang, '/login')}
-                lang={lang}
-                data-register-slot
-                data-ward-id={wardId}
-                data-msg-receiving-updates={t(lang, 'common.receivingUpdates')}
-              >
-                {t(lang, 'common.registerForUpdates')}
-              </Button>
-            )}
-          </EmptyState>
+          <EmptyState fact={emptyFact} />
         ) : (
           <>
 
@@ -161,21 +133,6 @@ const description = ward
             <nav class="candidate-links" aria-label={t(lang, 'ward.candidates.links.label')}>
               <a href={localePath(lang, `/ward/${wardId}/compare`)}>{t(lang, 'candidate.links.compare')}</a>
             </nav>
-
-            {!passwordMode && (
-              <section class="register-slot">
-                <Button
-                  variant="secondary"
-                  href={localePath(lang, '/login')}
-                  lang={lang}
-                  data-register-slot
-                  data-ward-id={wardId}
-                  data-msg-receiving-updates={t(lang, 'common.receivingUpdates')}
-                >
-                  {t(lang, 'common.registerForUpdates')}
-                </Button>
-              </section>
-            )}
           </>
         )}
       </div>
@@ -245,9 +202,5 @@ const description = ward
   .candidate-links a:hover,
   .candidate-links a:focus-visible {
     text-decoration: underline;
-  }
-
-  .register-slot {
-    display: flex;
   }
 </style>

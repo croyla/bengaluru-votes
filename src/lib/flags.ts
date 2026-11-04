@@ -49,7 +49,7 @@ export interface SubmitFlagInput {
    * ADVISORY ONLY — NOT TRUSTED. The ward a flag is filed under is DERIVED
    * server-side from `targetRef` (see `deriveTargetWardId`), never taken from
    * this client-supplied value. It stays on the type only because the API
-   * route's request schema still carries it; `submitFlag` ignores it. A
+   * route's request schema still carries it; `submitPublicFlag` ignores it. A
    * mismatch between this and the target's real ward means the derived (real)
    * ward wins — this is what stops a curator/citizen from filing a flag whose
    * target candidate lives in ward B into ward A's queue and having ward A's
@@ -63,7 +63,7 @@ export interface SubmitFlagInput {
   sourceUrl?: string | null;
 }
 
-/** Thrown by `deriveTargetWardId` (and surfaced by `submitFlag`) when `targetRef` is malformed for its `targetType`, or points at a target that doesn't exist — the API route turns this into a 400 rather than filing a flag against a nonexistent target. */
+/** Thrown by `deriveTargetWardId` (and surfaced by `submitPublicFlag`) when `targetRef` is malformed for its `targetType`, or points at a target that doesn't exist — the API route turns this into a 400 rather than filing a flag against a nonexistent target. */
 export class InvalidFlagTargetError extends Error {
   constructor(message = 'invalid_flag_target') {
     super(message);
@@ -123,7 +123,7 @@ async function findOrCreatePendingItem(tx: Tx, input: SubmitFlagInput, wardId: n
   try {
     // Nested transaction (SAVEPOINT): if the insert below loses the unique-
     // index race, only this savepoint rolls back — the outer `tx` stays
-    // usable for the re-select and everything submitFlag does after this.
+    // usable for the re-select and everything submitPublicFlag does after this.
     return await tx.transaction(async (tx2) => {
       const [created] = await tx2
         .insert(flagItems)
@@ -143,36 +143,6 @@ async function findOrCreatePendingItem(tx: Tx, input: SubmitFlagInput, wardId: n
     }
     throw err;
   }
-}
-
-/**
- * Submits a citizen's misinformation flag against `targetRef`
- * (docs/architecture.md §7). Finds-or-creates the pending queue item for `targetRef`, appends
- * this submitter's `flag_submissions` row in one transaction.
- */
-export async function submitFlag(userId: number, input: SubmitFlagInput): Promise<{ flagItemId: number }> {
-  // Derive the ward from the TARGET, server-side — the client-supplied
-  // `input.wardId` is never trusted (see `SubmitFlagInput.wardId` /
-  // `deriveTargetWardId`). A malformed/nonexistent target throws
-  // InvalidFlagTargetError here, BEFORE any transaction opens — nothing is
-  // written for a target that doesn't exist.
-  const wardId = await deriveTargetWardId(input.targetType, input.targetRef);
-
-  const flagItemId = await db.transaction(async (tx) => {
-    const itemId = await findOrCreatePendingItem(tx, input, wardId);
-
-    await tx.insert(flagSubmissions).values({
-      flagItemId: itemId,
-      userId,
-      detail: input.detail,
-      suggestedValue: input.suggestedValue ?? null,
-      sourceUrl: input.sourceUrl ?? null,
-    });
-
-    return itemId;
-  });
-
-  return { flagItemId };
 }
 
 export interface FlagResult { state: 'accepted' | 'duplicate' | 'already_reported' | 'already_reviewed'; flagItemId?: number }
@@ -206,12 +176,12 @@ export async function submitPublicFlag(who: FlagReporter, input: SubmitFlagInput
     const pending = await selectPending(tx, input.targetRef);
     if (pending) {
       const [prior] = await tx.select().from(flagSubmissions).where(and(eq(flagSubmissions.flagItemId,pending.id),
-        or(and(eq(flagSubmissions.browserHash,who.browserHash), sql`${flagSubmissions.createdAt}>now()-interval '30 days'`), who.userId !== null ? eq(flagSubmissions.userId,who.userId) : sql`false`))).limit(1);
+        eq(flagSubmissions.browserHash,who.browserHash), sql`${flagSubmissions.createdAt}>now()-interval '30 days'`)).limit(1);
       if (prior) { await metric('duplicate', tx); return { state: prior.fingerprint === fingerprint ? 'duplicate' : 'already_reported', flagItemId: pending.id }; }
     }
     await checkFlagAllowance(tx, who);
     const id = pending?.id ?? await findOrCreatePendingItem(tx,input,wardId);
-    await tx.insert(flagSubmissions).values({ flagItemId: id, userId: who.userId, browserHash: who.browserHash, fingerprint, detail: input.detail, suggestedValue: input.suggestedValue ?? null, sourceUrl: input.sourceUrl ?? null });
+    await tx.insert(flagSubmissions).values({ flagItemId: id, browserHash: who.browserHash, fingerprint, detail: input.detail, suggestedValue: input.suggestedValue ?? null, sourceUrl: input.sourceUrl ?? null });
     await recordFlagAdmission(tx,who);
     return { state: 'accepted', flagItemId: id };
   });

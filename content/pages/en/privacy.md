@@ -19,7 +19,7 @@ If you choose **use my current location**, your browser asks permission and send
 
 - **Issue votes:** we store your three choices and a hash of a random browser receipt. The receipt cookie lasts up to one year and lets your browser see its choices and results while preventing another ballot. The ballot record is not linked to your name, contact details, account or IP address. Public results are aggregate counts and percentages.
 - **Candidate-error reports:** we store your explanation and any suggested correction or source link for private curator review. Please do not include personal or sensitive information about yourself or others. Reports do not automatically change candidate information, and anonymous reporters receive submission confirmation only.
-- **Abuse prevention:** reporting uses a random browser cookie, hashed browser identifiers and keyed hashes of IP addresses to limit spam and duplicate submissions. These are technical identifiers, not proof of a person's identity. A report made while signed in as staff may also be linked to that staff account.
+- **Abuse prevention:** reporting uses a random browser cookie, hashed browser identifiers and keyed hashes of IP addresses to limit spam and duplicate submissions. These are technical identifiers, not proof of a person's identity.
 
 ## Cookies, Google services and logs
 

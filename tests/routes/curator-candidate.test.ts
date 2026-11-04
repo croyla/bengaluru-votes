@@ -154,7 +154,7 @@ async function sessionFor(userId: number): Promise<{ cookieValue: string; token:
 
 async function upsertUser(
   email: string,
-  role: 'citizen' | 'curator' | 'admin',
+  role: 'transcriber' | 'curator' | 'admin',
   extra: Partial<typeof schema.users.$inferInsert> = {},
 ): Promise<number> {
   const [row] = await db

@@ -67,16 +67,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  */
 export const E2E_FIXTURES_PATH = path.join(__dirname, '..', 'tests', 'e2e', '.fixtures.json');
 
-/**
- * Timestamped (not a fixed literal): src/lib/otp.ts's per-destination
- * cooldown (1/minute, 5/hour) is keyed on this exact address, and a
- * cooldown-skipped `requestOtp` call mints NO new code — flag.spec.ts's
- * curator login would flakily fail if a curator email were reused across
- * back-to-back `npm run seed:e2e` + `playwright test` cycles (a real
- * pattern during local iteration) and land inside the SAME contact's
- * 1-minute window as a just-consumed code from the previous run. A fresh
- * email per seed run makes each run's OTP history start clean.
- */
+/** Timestamped (not a fixed literal), so each seed run starts with a fresh curator account. */
 export const E2E_CURATOR_EMAIL = `e2e-curator-${Date.now()}@example.com`;
 export const E2E_FLAG_FIELD_KEY = 'age' as const;
 /** The two ages flag.spec.ts moves the candidate between, so every run changes the published value. */

@@ -37,7 +37,7 @@ afterAll(async () => {
 });
 
 describe('who may match', () => {
-  it.each(['citizen', 'transcriber'] as const)('refuses a %s', async (role) => {
+  it.each(['transcriber'] as const)('refuses a %s', async (role) => {
     expect((await list(await fx.person(role))).status).toBe(403);
   });
 

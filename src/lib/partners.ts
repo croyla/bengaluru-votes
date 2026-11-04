@@ -4,17 +4,14 @@
  *
  * PARTNERS ARE NOT A ROLE: a `partners` row is purely a
  * distribution/reach concept — a slug used in outbound links (`?src=` query
- * param, persisted onto `users.srcAttribution` at registration — see
- * src/lib/account-flow.ts/auth-flow.ts's registration path) and in the
- * partner kit page `/partner/{slug}` (Task 48). It carries no permissions
+ * param, src/lib/attribution.ts) and in the partner kit page `/partner/{slug}` (Task 48). It carries no permissions
  * of its own and is entirely separate from `users.role`
  * (src/lib/admin.ts) — a partner is not a user account.
  *
  * TWO WORK QUEUES this module surfaces for the admin console:
  *   1. COVERAGE (`partnerCoverage`) — which of the 369 wards have >=1
  *      partner covering them, and which don't (the UNCOVERED set — the
- *      early-warning signal for central-Bengaluru distribution skew). Per-partner attributed registrations let an admin see which
- *      partnerships are actually converting sign-ups.
+ *      early-warning signal for central-Bengaluru distribution skew).
  *   2. EOI QUEUE (`listEois` + the triage actions) — expressions of
  *      interest split by path. Accepting the 'awareness' path PROVISIONS a
  *      partner (slug + kit page). Accepting the 'curation' path does NOT
@@ -177,8 +174,6 @@ export interface PartnerCoverageRow {
   partnerId: number;
   slug: string;
   wardIds: number[];
-  /** Count of `users` whose `srcAttribution` equals this partner's slug (the `?src=` attribution, persisted at registration). */
-  registrations: number;
 }
 
 export interface PartnerCoverage {
@@ -218,21 +213,10 @@ export async function partnerCoverage(): Promise<PartnerCoverage> {
   const covered = allWardIds.filter((id) => coveredSet.has(id)).sort((a, b) => a - b);
   const uncovered = allWardIds.filter((id) => !coveredSet.has(id)).sort((a, b) => a - b);
 
-  const slugs = allPartners.map((p) => p.slug);
-  const regCountRows = slugs.length
-    ? await db
-        .select({ srcAttribution: users.srcAttribution, count: sql<number>`count(*)::int` })
-        .from(users)
-        .where(inArray(users.srcAttribution, slugs))
-        .groupBy(users.srcAttribution)
-    : [];
-  const regCountBySlug = new Map(regCountRows.map((r) => [r.srcAttribution, Number(r.count)]));
-
   const byPartner: PartnerCoverageRow[] = allPartners.map((partner) => ({
     partnerId: partner.id,
     slug: partner.slug,
     wardIds: (wardIdsByPartner.get(partner.id) ?? []).sort((a, b) => a - b),
-    registrations: regCountBySlug.get(partner.slug) ?? 0,
   }));
 
   return { covered, uncovered, total: allWardIds.length, byPartner };
@@ -245,10 +229,9 @@ export interface PartnerRosterRow {
   contact: string | null;
   createdAt: Date;
   wardIds: number[];
-  registrations: number;
 }
 
-/** The partner roster: every partner with its ward set + attributed registrations, for the admin page's list/edit forms. */
+/** The partner roster: every partner with its ward set, for the admin page's list/edit forms. */
 export async function listPartners(): Promise<PartnerRosterRow[]> {
   const [allPartners, coverage] = await Promise.all([db.select().from(partners).orderBy(partners.id), partnerCoverage()]);
   const coverageByPartnerId = new Map(coverage.byPartner.map((row) => [row.partnerId, row]));
@@ -260,7 +243,6 @@ export async function listPartners(): Promise<PartnerRosterRow[]> {
     contact: partner.contact,
     createdAt: partner.createdAt,
     wardIds: coverageByPartnerId.get(partner.id)?.wardIds ?? [],
-    registrations: coverageByPartnerId.get(partner.id)?.registrations ?? 0,
   }));
 }
 

@@ -1,9 +1,8 @@
 /**
  * ModalShell — shared <dialog> modal behavior (design-system.md §7.9).
- * Framework-free vanilla TS over the native <dialog> element. The three
- * real modals (Register/Login, Flag misinformation, Cast issue vote —
- * Tasks 27/32/33) each import `ModalController` (or `initModal`),
- * wrap their own `<dialog>` markup/content, and get this shared shell
+ * Framework-free vanilla TS over the native <dialog> element. Each real
+ * modal (Flag misinformation — Task 32) imports `ModalController` (or `initModal`),
+ * wraps its own `<dialog>` markup/content, and gets this shared shell
  * behavior for free:
  *
  *   - open()/close() lifecycle over dialog.showModal()/close()

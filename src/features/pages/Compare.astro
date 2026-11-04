@@ -7,7 +7,6 @@
  */
 import Base from '../../layouts/Base.astro';
 import Breadcrumbs from '../../components/Breadcrumbs.astro';
-import Button from '../../components/Button.astro';
 import EmptyState from '../../components/EmptyState.astro';
 import CandidateRow from '../../components/CandidateRow.astro';
 import type { CandidateRowCandidate } from '../../components/CandidateRow.astro';
@@ -24,10 +23,7 @@ import {
   type CandidateProfileFieldKey,
 } from '../../lib/candidate-profile';
 import { getKnownSetting } from '../../lib/settings';
-import { masterLoginEnabled } from '../../lib/master-login';
 
-// TEMPORARY (until email works for OTP): no register-for-updates slot in password mode.
-const passwordMode = masterLoginEnabled();
 
 interface Props {
   lang: Lang;
@@ -244,27 +240,6 @@ const description = ward ? t(lang, 'compare.meta.description', { wardName }) : t
             )}
           </div>
         </div>
-
-        {!passwordMode && (
-          <section class="updates-band" aria-labelledby="updates-heading">
-            <div class="compare-container updates-content">
-              <div class="heading-group">
-                <h2 id="updates-heading">{t(lang, 'compare.updates.heading')}</h2>
-                <p>{t(lang, 'compare.updates.description', { wardName })}</p>
-              </div>
-              <Button
-                variant="primary"
-                href={localePath(lang, '/login')}
-                lang={lang}
-                data-register-slot
-                data-ward-id={wardId}
-                data-msg-receiving-updates={t(lang, 'common.receivingUpdates')}
-              >
-                {t(lang, 'common.registerForUpdates')}
-              </Button>
-            </div>
-          </section>
-        )}
       </div>
     ) : (
       <EmptyState fact={t(lang, 'ward.notFound.fact')} />
@@ -283,20 +258,6 @@ const description = ward ? t(lang, 'compare.meta.description', { wardName }) : t
     padding-block: var(--space-8);
     background: var(--color-hero-bg);
     color: var(--color-on-hero);
-  }
-
-  .updates-content {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-6) var(--space-8);
-  }
-
-  .heading-group {
-    display: grid;
-    gap: var(--space-2);
-    min-width: 0;
   }
 
   .header-content {
@@ -422,16 +383,6 @@ const description = ward ? t(lang, 'compare.meta.description', { wardName }) : t
 
   .field-value--not-declared {
     color: var(--color-text-muted);
-  }
-
-  .updates-band {
-    padding-block: var(--space-8);
-    background: var(--color-methodology-bg);
-    color: var(--color-methodology-text);
-  }
-
-  .updates-content .heading-group {
-    flex: 1 1 320px;
   }
 
   h2 {

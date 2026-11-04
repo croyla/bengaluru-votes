@@ -4,13 +4,13 @@
  *
  * VOTE SEMANTICS (the load-bearing behavior this suite exists to pin down):
  *   - RENAME updates the title IN PLACE — the `ward_issues.id` never
- *     changes, so an `issue_vote_selections` row referencing it (a
- *     citizen's cast vote) survives a rename untouched. Votes are NOT lost
- *     when a curator retitles an issue.
+ *     changes, so an `anonymous_issue_vote_selections` row referencing it
+ *     (a cast vote) survives a rename untouched. Votes are NOT lost when a
+ *     curator retitles an issue.
  *   - REMOVE deletes the `ward_issues` row outright, which FK-cascades its
- *     `issue_vote_selections` rows away — but a citizen's OTHER selections
- *     in the SAME vote set (for issues that were not removed) are left
- *     alone ("delete cascades selections + remaining stand").
+ *     `anonymous_issue_vote_selections` rows away — but the OTHER
+ *     selections in the SAME vote set (for issues that were not removed)
+ *     are left alone ("delete cascades selections + remaining stand").
  *
  * Curators are city-wide: the curator here has no ward assignment of any
  * kind and can still edit issues in any ward.
@@ -20,6 +20,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { eq, inArray } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import * as schema from '../../src/db/schema';
 
 if (!process.env.DATABASE_URL) {
@@ -68,11 +69,10 @@ async function resetFixtures(): Promise<void> {
     .where(inArray(schema.wardIssues.wardId, ALL_WARD_IDS));
   const issueIds = issueRows.map((r) => r.id);
   if (issueIds.length > 0) {
-    await db.delete(schema.issueVoteSelections).where(inArray(schema.issueVoteSelections.wardIssueId, issueIds));
     await db.delete(schema.candidateStances).where(inArray(schema.candidateStances.wardIssueId, issueIds));
   }
   await db.delete(schema.wardIssues).where(inArray(schema.wardIssues.wardId, ALL_WARD_IDS));
-  await db.delete(schema.issueVoteSets).where(inArray(schema.issueVoteSets.wardId, ALL_WARD_IDS));
+  await db.delete(schema.anonymousIssueVoteSets).where(inArray(schema.anonymousIssueVoteSets.wardId, ALL_WARD_IDS));
 }
 
 describe('src/lib/ward-issues.ts (Task 39) — add/rename/remove', () => {
@@ -129,25 +129,15 @@ describe('src/lib/ward-issues.ts (Task 39) — add/rename/remove', () => {
   });
 
   describe('renameWardIssue — id unchanged, votes preserved', () => {
-    it('title changes, id unchanged, and a pre-existing issue_vote_selection referencing it still exists', async () => {
+    it('title changes, id unchanged, and a pre-existing vote selection referencing it still exists', async () => {
       const { id: issueId } = await addWardIssue(ACTOR_CURATOR, WARD_A.id, 'Original Title');
 
-      // Simulate a citizen's existing cast vote referencing this issue.
-      const [voter] = await db
-        .insert(schema.users)
-        .values({ email: 'ward-issues-lib-test-voter@example.com', role: 'citizen', status: 'active' })
-        .onConflictDoUpdate({ target: schema.users.email, set: { role: 'citizen', status: 'active' } })
-        .returning({ id: schema.users.id });
-      // issue_vote_sets' uniqueness is a PARTIAL index (active-only, see
-      // schema.ts), which onConflictDoUpdate can't target directly — clear
-      // any leftover set for this fixture user first instead, so a rerun
-      // after a failed prior run stays idempotent.
-      await db.delete(schema.issueVoteSets).where(eq(schema.issueVoteSets.userId, voter!.id));
+      // Simulate an existing anonymous cast vote referencing this issue.
       const [voteSet] = await db
-        .insert(schema.issueVoteSets)
-        .values({ userId: voter!.id, wardId: WARD_A.id })
-        .returning({ id: schema.issueVoteSets.id });
-      await db.insert(schema.issueVoteSelections).values({ setId: voteSet!.id, wardIssueId: issueId });
+        .insert(schema.anonymousIssueVoteSets)
+        .values({ voterHash: randomUUID(), wardId: WARD_A.id })
+        .returning({ id: schema.anonymousIssueVoteSets.id });
+      await db.insert(schema.anonymousIssueVoteSelections).values({ setId: voteSet!.id, wardIssueId: issueId });
 
       await renameWardIssue(ACTOR_CURATOR, issueId, 'Renamed Title');
 
@@ -158,16 +148,14 @@ describe('src/lib/ward-issues.ts (Task 39) — add/rename/remove', () => {
 
       const [selection] = await db
         .select()
-        .from(schema.issueVoteSelections)
-        .where(eq(schema.issueVoteSelections.wardIssueId, issueId));
+        .from(schema.anonymousIssueVoteSelections)
+        .where(eq(schema.anonymousIssueVoteSelections.wardIssueId, issueId));
       expect(selection).toBeDefined();
       expect(selection?.setId).toBe(voteSet!.id);
 
-      // Cleanup this test's own vote fixtures so they don't leak into the
-      // remove-cascade test below.
-      await db.delete(schema.issueVoteSelections).where(eq(schema.issueVoteSelections.wardIssueId, issueId));
-      await db.delete(schema.issueVoteSets).where(eq(schema.issueVoteSets.id, voteSet!.id));
-      await db.delete(schema.users).where(eq(schema.users.id, voter!.id));
+      // Cleanup this test's own vote fixtures (selections cascade) so they
+      // don't leak into the remove-cascade test below.
+      await db.delete(schema.anonymousIssueVoteSets).where(eq(schema.anonymousIssueVoteSets.id, voteSet!.id));
     });
 
     it('curator can rename an issue in a second ward (city-wide)', async () => {
@@ -184,17 +172,11 @@ describe('src/lib/ward-issues.ts (Task 39) — add/rename/remove', () => {
       const { id: issueToRemove } = await addWardIssue(ACTOR_CURATOR, WARD_A.id, 'Issue To Remove');
       const { id: issueToKeep } = await addWardIssue(ACTOR_CURATOR, WARD_A.id, 'Issue To Keep');
 
-      const [voter] = await db
-        .insert(schema.users)
-        .values({ email: 'ward-issues-lib-test-voter-2@example.com', role: 'citizen', status: 'active' })
-        .onConflictDoUpdate({ target: schema.users.email, set: { role: 'citizen', status: 'active' } })
-        .returning({ id: schema.users.id });
-      await db.delete(schema.issueVoteSets).where(eq(schema.issueVoteSets.userId, voter!.id));
       const [voteSet] = await db
-        .insert(schema.issueVoteSets)
-        .values({ userId: voter!.id, wardId: WARD_A.id })
-        .returning({ id: schema.issueVoteSets.id });
-      await db.insert(schema.issueVoteSelections).values([
+        .insert(schema.anonymousIssueVoteSets)
+        .values({ voterHash: randomUUID(), wardId: WARD_A.id })
+        .returning({ id: schema.anonymousIssueVoteSets.id });
+      await db.insert(schema.anonymousIssueVoteSelections).values([
         { setId: voteSet!.id, wardIssueId: issueToRemove },
         { setId: voteSet!.id, wardIssueId: issueToKeep },
       ]);
@@ -206,14 +188,12 @@ describe('src/lib/ward-issues.ts (Task 39) — add/rename/remove', () => {
 
       const remainingSelections = await db
         .select()
-        .from(schema.issueVoteSelections)
-        .where(eq(schema.issueVoteSelections.setId, voteSet!.id));
+        .from(schema.anonymousIssueVoteSelections)
+        .where(eq(schema.anonymousIssueVoteSelections.setId, voteSet!.id));
       expect(remainingSelections).toHaveLength(1);
       expect(remainingSelections[0]?.wardIssueId).toBe(issueToKeep);
 
-      await db.delete(schema.issueVoteSelections).where(eq(schema.issueVoteSelections.setId, voteSet!.id));
-      await db.delete(schema.issueVoteSets).where(eq(schema.issueVoteSets.id, voteSet!.id));
-      await db.delete(schema.users).where(eq(schema.users.id, voter!.id));
+      await db.delete(schema.anonymousIssueVoteSets).where(eq(schema.anonymousIssueVoteSets.id, voteSet!.id));
     });
 
     it('curator can remove an issue in a second ward (city-wide)', async () => {

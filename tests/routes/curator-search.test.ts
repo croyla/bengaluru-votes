@@ -78,6 +78,6 @@ it('stops at the cap and says so', async () => {
   expect(html).toContain(t('en', 'curator.dashboard.search.capped', { count: SEARCH_CAP }));
 });
 
-it('refuses a citizen', async () => {
-  expect((await run(DashboardRoute, '/curator?q=alpha', { auth: await fx.person('citizen') })).status).toBe(403);
+it('refuses a transcriber', async () => {
+  expect((await run(DashboardRoute, '/curator?q=alpha', { auth: await fx.person('transcriber') })).status).toBe(403);
 });

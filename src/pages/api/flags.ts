@@ -13,7 +13,7 @@ const schema = z.object({
   detail:z.string().trim().min(1).max(2000), suggestedValue:z.string().trim().min(1).max(1000).nullable().optional(), sourceUrl:webUrl.nullable().optional(),
   recaptchaToken:z.string().min(1).max(4096),
 }).strict();
-export const POST: APIRoute = async ({ request, locals, cookies, clientAddress }) => {
+export const POST: APIRoute = async ({ request, cookies, clientAddress }) => {
   if (process.env.FLAGS_SUBMISSIONS_PAUSED === 'true') return flagJson({ error:'paused' },503);
   try {
     const networkHash = flagNetworkHash(request,clientAddress);
@@ -30,7 +30,7 @@ export const POST: APIRoute = async ({ request, locals, cookies, clientAddress }
       await metric(unavailable ? 'captcha_error' : 'captcha_failed');
       return flagJson({ error:unavailable ? 'verification_unavailable' : 'verification_failed' },unavailable ? 503 : 403);
     }
-    const result = await submitPublicFlag({ browserHash, networkHash, userId:locals.session?.userId ?? null },parsed.data);
+    const result = await submitPublicFlag({ browserHash, networkHash },parsed.data);
     logEvent('flag_submitted', { state:result.state });
     // An id is not an anonymous status capability; no anonymous read endpoint exists.
     return flagJson({ ok:true, ...result });

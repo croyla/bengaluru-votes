@@ -12,7 +12,7 @@ import { verifyRecaptcha } from '../../src/lib/recaptcha';
 const client = postgres(process.env.DATABASE_URL!, { max: 5 });
 const db = drizzle(client, { schema });
 const WARD_ID = 99311;
-let candidateId: number, userId: number;
+let candidateId: number;
 const targetRefFor = (key: string) => `candidate:${candidateId}:${key}`;
 function req(body: unknown) { return new Request('http://localhost/api/flags', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); }
 function context(body: unknown, token = issueFlagToken()) { return { request: req(body), clientAddress: '127.0.0.1', locals: { session: null }, cookies: { get: () => token ? { value: token } : undefined } } as any; }
@@ -44,12 +44,6 @@ describe('anonymous flag API', () => {
       })
       .returning();
     candidateId = candidate!.id;
-
-    const [user] = await db
-      .insert(schema.users)
-      .values({ email: `flags-route-test-user-${randomUUID()}@example.com`, homeWardId: WARD_ID, role: 'citizen', status: 'active' })
-      .returning();
-    userId = user!.id;
   });
 
   afterAll(async () => {

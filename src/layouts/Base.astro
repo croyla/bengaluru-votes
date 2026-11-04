@@ -14,31 +14,16 @@
  * cookies/session, so the HTML it produces is identical for every
  * visitor and safe for nginx's anonymous-page micro-cache.
  *
- * The Register/Login modal (Task 27) is rendered ONCE here, on
- * every page, so it's always reachable from any ward page's "Register for
- * updates" slot without each of
- * those pages needing to know about it. Its own markup/behavior are
- * self-contained (src/components/RegisterLoginModal.astro,
- * src/islands/RegisterLoginModal.ts); it never changes the server-rendered
- * HTML per visitor (the dialog always starts closed), so it doesn't affect
- * this layout's cache-safety.
- *
- * MeSlot (Task 28, src/islands/MeSlot.ts) is mounted ONCE here too, for the
- * register-for-updates slots. It makes exactly ONE
- * `/api/me` call per page load and swaps that (and, where present, a ward
- * page's register-for-updates slot / vote-action hint) client-side — never
- * server-side, which is what keeps this layout's HTML cache-safe.
- *
- * The Flag misinformation modal (Task 32) is rendered ONCE here
- * too, same rationale as Register/Login: any page that shows curator-
+ * The Flag misinformation modal (Task 32) is rendered ONCE here, so
+ * every page reaches it without wiring of its own: any page that shows curator-
  * maintained data (Ward.astro and Candidate.astro today) and
  * Task 41) renders a "Flag an error" button carrying its own
  * `data-flag-action`/`data-ward-id`/`data-flag-targets`, and
  * src/islands/FlagModal.ts's `initFlagModal()` (this component's own
  * script) wires every such button on the page to this one dialog — no
- * per-page wiring script needed. Same cache-safety note as Register/Login:
- * self-contained markup/behavior, dialog always starts closed, never reads
- * cookies/session.
+ * per-page wiring script needed. Self-contained markup/behavior, the
+ * dialog always starts closed, and it never reads cookies/session, so it
+ * does not affect this layout's cache-safety.
  *
  * The `?src` attribution cookie writer (Task 49, architecture §5/§13; dormant,
  * §15) is rendered ONCE here too, in `<head>`, on every page —
@@ -86,17 +71,12 @@ import SkipLink from '../components/SkipLink.astro';
 import EnvBanner from '../components/EnvBanner.astro';
 import AppBar from '../components/AppBar.astro';
 import Footer from '../components/Footer.astro';
-import RegisterLoginModal from '../components/RegisterLoginModal.astro';
-import { masterLoginEnabled } from '../lib/master-login';
 import FlagModal from '../components/FlagModal.astro';
 import { localePath, type Lang } from '../i18n';
 import { ATTRIBUTION_SCRIPT_SOURCE } from '../lib/attribution';
 import { gaLoaderSrc, gaConfigScriptSource } from '../lib/analytics';
 import { jsonLd } from '../lib/seo';
 
-// TEMPORARY (until email works for OTP): registration is parked in
-// password mode, so the Register/Login modal is not rendered at all.
-const passwordMode = masterLoginEnabled();
 
 interface Props {
   lang: Lang;
@@ -251,11 +231,6 @@ const showGa = !noindex && !!gaMeasurementId;
       <slot />
     </main>
     <Footer lang={lang} />
-    {!passwordMode && <RegisterLoginModal lang={lang} />}
     <FlagModal lang={lang} />
-    <script>
-      import { initMeSlot } from '../islands/MeSlot';
-      initMeSlot();
-    </script>
   </body>
 </html>

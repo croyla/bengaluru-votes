@@ -335,12 +335,10 @@ describe('Guide & explainer pages (Task 21)', () => {
       expect(externalLinks.length).toBe(2);
       expect(html).toContain('Fill Form 6 online');
       expect(html).toContain('Fill Form 8 online');
-      // Every page also carries Base.astro's global Register/Login modal
-      // (Task 27), whose step-3 consent sentence links to /terms and
-      // /privacy with the SAME rel, and the footer's three social links
-      // (design-system §7.2) — so the page-wide count is these two guided
-      // link-out buttons PLUS those five, not just 2.
-      expect((html.match(/rel="noopener noreferrer"/g) ?? []).length).toBe(7);
+      // Every page also carries the footer's three social links
+      // (design-system §7.2) with the SAME rel — so the page-wide count is
+      // these two guided link-out buttons PLUS those three, not just 2.
+      expect((html.match(/rel="noopener noreferrer"/g) ?? []).length).toBe(5);
     });
 
     it('renders DeadlineBanner when roll_deadline is set in the future', async () => {
@@ -430,19 +428,19 @@ describe('Guide & explainer pages (Task 21)', () => {
       expect(kn.html).toContain('action="/kn/voting-guide/find-booth"');
     });
 
-    it('emits its own BoothLookup island script, plus Base.astro\'s global Register/Login, Flag, MeSlot, and ?src attribution scripts (Tasks 27/28/32/33/49) — no others', async () => {
+    it('emits its own BoothLookup island script, plus Base.astro\'s global Flag and ?src attribution scripts (Tasks 28/32/49) — no others', async () => {
       const { html } = await renderPage(FindBooth, 'en', '/voting-guide/find-booth');
       const scriptOpenTags = html.match(/<script\b[^>]*>/g) ?? [];
-      // Five scripts: this page's own BoothLookup island, three Base.astro
-      // module scripts (RegisterLoginModal, FlagModal, MeSlot),
-      // and Base.astro's inline `?src` attribution writer (Task 49,
-      // src/lib/attribution.ts) — never a stray/unexpected sixth script.
-      expect(scriptOpenTags).toHaveLength(5);
+      // Three scripts: this page's own BoothLookup island, Base.astro's
+      // FlagModal module script, and Base.astro's inline `?src`
+      // attribution writer (Task 49, src/lib/attribution.ts) — never a
+      // stray/unexpected fourth script.
+      expect(scriptOpenTags).toHaveLength(3);
       expect(html).toMatch(/FindBooth\.astro\?astro&type=script/);
-      expect(html).toMatch(/RegisterLoginModal\.astro\?astro&type=script/);
       expect(html).toMatch(/FlagModal\.astro\?astro&type=script/);
+      expect(html).not.toMatch(/RegisterLoginModal\.astro\?astro&type=script/);
+      expect(html).not.toMatch(/Base\.astro\?astro&type=script/);
       expect(html).not.toContain('data-vote-modal');
-      expect(html).toMatch(/Base\.astro\?astro&type=script/);
       expect(html).toMatch(/bv_src/);
     });
 

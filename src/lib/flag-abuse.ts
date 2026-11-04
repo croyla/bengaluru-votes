@@ -6,7 +6,7 @@ import { db, type Tx } from '../db/client';
 export const FLAG_COOKIE = 'bv_flag_browser';
 export const FLAG_COOKIE_SECONDS = 30 * 24 * 3600;
 export type FlagMetric = 'accepted' | 'duplicate' | 'captcha_failed' | 'captcha_error' | 'rate_limited' | 'spam';
-export interface FlagReporter { browserHash: string; networkHash: string; userId: number | null }
+export interface FlagReporter { browserHash: string; networkHash: string }
 export class FlagRateLimitError extends Error { constructor() { super('flag_rate_limited'); } }
 function secret(): string {
   const value = process.env.FLAGS_ABUSE_SECRET;
@@ -53,25 +53,22 @@ export async function admitFlagRequest(networkHash: string): Promise<boolean> {
 }
 export async function lockReporter(tx: Tx, who: FlagReporter): Promise<void> {
   const keys = [`browser:${who.browserHash}`, `network:${who.networkHash}`];
-  if (who.userId !== null) keys.push(`account:${who.userId}`);
   for (const key of keys.sort()) await flagLock(tx, key);
 }
 export async function checkFlagAllowance(tx: Tx, who: FlagReporter): Promise<void> {
-  const matches = [sql`browser_hash=${who.browserHash}`];
-  if (who.userId !== null) matches.push(sql`user_id=${who.userId}`);
-  for (const match of matches) {
-    const [r] = await tx.execute(sql`select count(*)::int as daily, count(*) filter(where created_at>now()-interval '10 minutes')::int as burst from flag_admissions where ${match} and created_at>now()-interval '24 hours'`);
+  {
+    const [r] = await tx.execute(sql`select count(*)::int as daily, count(*) filter(where created_at>now()-interval '10 minutes')::int as burst from flag_admissions where browser_hash=${who.browserHash} and created_at>now()-interval '24 hours'`);
     if (Number(r!.daily) >= flagLimit('FLAGS_REPORTER_DAILY_LIMIT', 10) || Number(r!.burst) >= flagLimit('FLAGS_REPORTER_BURST_LIMIT', 3)) throw new FlagRateLimitError();
   }
   const [r] = await tx.execute(sql`select count(*)::int as n from flag_admissions where network_hash=${who.networkHash} and created_at>now()-interval '24 hours'`);
   if (Number(r!.n) >= flagLimit('FLAGS_NETWORK_DAILY_LIMIT', 100)) throw new FlagRateLimitError();
 }
 export async function recordFlagAdmission(tx: Tx, who: FlagReporter): Promise<void> {
-  await tx.execute(sql`insert into flag_admissions(browser_hash,network_hash,user_id) values(${who.browserHash},${who.networkHash},${who.userId})`);
+  await tx.execute(sql`insert into flag_admissions(browser_hash,network_hash) values(${who.browserHash},${who.networkHash})`);
   await metric('accepted', tx);
 }
 
-/** Always-on metadata cleanup, independent of the disabled general retention job. */
+/** Always-on cleanup of short-lived abuse metadata (not report content). */
 export async function cleanupFlagAbuse(): Promise<void> {
   await db.transaction(async tx => {
     await tx.execute(sql`update flag_submissions set browser_hash=null where browser_hash is not null and created_at<=now()-interval '30 days'`);

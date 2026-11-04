@@ -12,10 +12,9 @@
  * WHY THIS AWAITS instead of calling `translateFieldSoon`: that function
  * is deliberately synchronous `void` — fine for a long-lived server
  * process, wrong for a one-shot cron job. A `tsx jobs/X.ts` invocation
- * calls `process.exit()` on completion (see the guard below and
- * jobs/run-campaign.ts's docstring for why a one-shot job must exit
- * explicitly rather than let the DB pool's open connections keep the
- * event loop alive) — if this job fired-and-forgot each retry, `exit(0)`
+ * calls `process.exit()` on completion (see the guard below: a one-shot
+ * job must exit explicitly rather than let the DB pool's open connections
+ * keep the event loop alive) — if this job fired-and-forgot each retry, `exit(0)`
  * could kill those in-flight promises before they ever wrote anything,
  * silently discarding the very retries this job exists to perform. So
  * this job calls the AWAITABLE `translateFieldNow` directly, one row at a

@@ -1,7 +1,7 @@
 /**
  * Business logic behind the curator pages: the dashboard, the review queue,
  * one flag (the fix and the dismissal), the candidate editor and the ward
- * page. Mirrors the split used by src/lib/account-flow.ts: this module owns
+ * page. Same split as src/lib/login-flow.ts: this module owns
  * state-loading and the mutation dispatch, the page route twins
  * (src/pages/curator/*) own the HTTP concerns a plain module cannot
  * (redirects, no-store, 403/404 status). What a correction is, and how one
@@ -173,7 +173,6 @@ export async function loadQueueList(sort: QueueSort = 'recent', page = 1): Promi
 
 export interface FlagSubmissionRow {
   id: number;
-  userId: number | null;
   isSpam: boolean;
   detail: string;
   suggestedValue: string | null;
@@ -230,7 +229,6 @@ export async function loadQueueItem(id: number, page = 1): Promise<QueueItemDeta
   const submissions = await db
     .select({
       id: flagSubmissions.id,
-      userId: flagSubmissions.userId,
       isSpam: flagSubmissions.isSpam,
       detail: flagSubmissions.detail,
       suggestedValue: flagSubmissions.suggestedValue,

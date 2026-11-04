@@ -29,13 +29,13 @@ export default defineConfig({
       // page HTML — with no `nonce` attribute at all — whenever that
       // script's bundled chunk is small enough to pass Vite's default
       // `assetsInlineLimit` (4096 bytes) AND isn't imported by another JS
-      // chunk. That happened for Home.astro's WardLookup init script and
-      // Base.astro's MeSlot init script (both small, single-consumer) while
-      // the larger RegisterLoginModal/FlagModal/VoteModal island scripts
+      // chunk. That happened for Home.astro's WardLookup init script and a
+      // small Base.astro init script (both single-consumer) while
+      // the larger modal island scripts
       // (>4KB each) stayed external and were unaffected. src/lib/csp.ts's
       // `script-src 'self' 'nonce-...'` policy has no `'unsafe-inline'` and
       // no hash for that silently-inlined code, so real browsers block it
-      // outright — the WardLookup/MeSlot islands never actually ran, and a
+      // outright — those islands never actually ran, and a
       // real visitor's "Find my ward" submit silently fell through to a
       // native full-page form POST, which src/middleware.ts's own
       // Origin/Sec-Fetch-Site check then rejects with 403 (no Origin header

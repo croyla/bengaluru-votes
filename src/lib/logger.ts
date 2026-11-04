@@ -1,25 +1,16 @@
 /**
- * Structured logging (pino) + server-side-only, env-gated Sentry error
- * reporting.
- *
- * Architecture references: §10 "Structured logs to stdout via Compose
- * logging" and "Sentry (free tier), server-side only — `app` and `jobs`
- * report errors; there is no client-side Sentry, so no added JS and no CSP
- * change; event content is scrubbed per §13"; §13 "Logs & telemetry carry
- * IDs, not identities ... Sentry runs with default PII capture off and
- * server-side scrubbing of contact and address fields".
+ * Structured logging (pino) to stdout via Compose logging (architecture
+ * §10; §13 "Logs & telemetry carry IDs, not identities").
  *
  * ============================================================================
  * PII SCRUB — THE LOAD-BEARING PART OF THIS FILE
  * ============================================================================
  * `scrubPii` is a pure, recursive redactor: it walks any plain object/array
  * and replaces the VALUE of any key matching (case-insensitively) the PII
- * key set below with `'[redacted]'`. It is wired into BOTH pino (every log
+ * key set below with `'[redacted]'`. It is wired into pino: every log
  * line's merging object is scrubbed by `formatters.log` before
  * serialization — this covers arbitrary nesting/keys, which a static
- * `redact` path list cannot) and Sentry's `beforeSend` (the entire event —
- * `request`, `extra`, `contexts`, breadcrumbs, `message` — is scrubbed
- * before it ever leaves the box). String VALUES are additionally passed
+ * `redact` path list cannot. String VALUES are additionally passed
  * through a best-effort email/phone regex scrub as defense-in-depth, since
  * an opaque-looking field could still carry PII in free text (e.g. an
  * error message that happens to interpolate an address) — the key-based
@@ -31,16 +22,8 @@
  * and a hard depth cap stops runaway recursion on deeply-nested-but-acyclic
  * input.
  * ============================================================================
- *
- * SENTRY ENV-GATING: `Sentry.init` is called at most once, only when
- * `SENTRY_DSN` is set. Unset (dev/test/CI) -> this module is a clean no-op:
- * no network call, no throw, `captureException` just logs via pino.
- * `@sentry/node` only — never `@sentry/browser`, never imported from
- * client-shipped code, so no added JS and no CSP change (architecture
- * §13/§14.5).
  */
 import pino from 'pino';
-import * as Sentry from '@sentry/node';
 
 /**
  * Keys whose VALUE gets redacted, wherever they appear in the object graph.
@@ -87,8 +70,7 @@ function scrubString(value: string): string {
 
 /**
  * Recursively redacts PII from `value`. Exported for tests and for direct
- * use by callers that want to scrub a payload before it reaches either
- * pino or Sentry.
+ * use by callers that want to scrub a payload before it reaches pino.
  */
 export function scrubPii(value: unknown, depth = 0, seen: Set<object> = new Set()): unknown {
   if (depth > MAX_DEPTH) return '[max-depth]';
@@ -100,9 +82,8 @@ export function scrubPii(value: unknown, depth = 0, seen: Set<object> = new Set(
   if (typeof value !== 'object') return value;
 
   // Leave non-plain objects (Error, Date, RegExp, etc.) alone rather than
-  // risk mangling them — pino/Sentry's own serializers handle those types;
-  // this function's job is plain data (the fields object, JSON-shaped
-  // Sentry event bodies).
+  // risk mangling them — pino's own serializers handle those types;
+  // this function's job is plain data (the fields object).
   if (value instanceof Date || value instanceof RegExp) return value;
 
   if (seen.has(value)) return '[circular]';
@@ -152,58 +133,11 @@ export const logger = pino({
 });
 
 /**
- * Scrubs a Sentry event before it leaves the box (Sentry is dormant —
- * architecture §15). Exported
- * un-bound so tests can call it directly against a fixture event without a
- * live DSN or a real `Sentry.init` call.
- */
-export function sentryBeforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
-  return scrubPii(event) as Sentry.ErrorEvent;
-}
-
-let sentryInitialized = false;
-
-/**
- * Initializes Sentry exactly once, and only when `SENTRY_DSN` is set.
- * Called on module load (below); also safe to call again (e.g. from a
- * test) — a second call is a no-op once initialized, and a call with no
- * DSN never touches the network.
- */
-export function initSentry(): void {
-  if (sentryInitialized) return;
-  const dsn = process.env.SENTRY_DSN;
-  if (!dsn) return;
-
-  Sentry.init({
-    dsn,
-    // Default PII capture off (architecture §13, §15) — never send IP/cookies/
-    // request bodies automatically; only what our own capture calls pass.
-    sendDefaultPii: false,
-    beforeSend: sentryBeforeSend,
-  });
-  sentryInitialized = true;
-}
-
-/** True once `initSentry` has actually called `Sentry.init` (test hook). */
-export function isSentryInitialized(): boolean {
-  return sentryInitialized;
-}
-
-initSentry();
-
-/**
- * Reports `err` to Sentry (scrubbed, no-op if Sentry never initialized)
- * and always logs it via pino, so the Compose log stream carries every
- * captured error even when Sentry isn't configured (dev without a
- * DSN). `context` is extra structured data (opaque fields only, same
- * convention as `logEvent`) attached to both the log line and the Sentry
- * event's `extra` — scrubbed either way.
+ * Logs `err` via pino (scrubbed). `context` is extra structured data
+ * (opaque fields only, same convention as `logEvent`) attached to the log
+ * line.
  */
 export function captureException(err: unknown, context?: Record<string, unknown>): void {
   const message = err instanceof Error ? err.message : String(err);
   logger.error({ event: 'exception', message, ...(context ?? {}) });
-
-  if (sentryInitialized) {
-    Sentry.captureException(err, context ? { extra: context } : undefined);
-  }
 }

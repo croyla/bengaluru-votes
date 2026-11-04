@@ -306,9 +306,9 @@ describe('DeadlineBanner', () => {
     const html = await render(DeadlineBanner, {
       deadlineISO,
       lang: 'en',
-      labelKey: 'common.registerForUpdates',
+      labelKey: 'common.officialLinkPending',
     });
-    expect(html).toContain(t('en', 'common.registerForUpdates'));
+    expect(html).toContain(t('en', 'common.officialLinkPending'));
   });
 });
 
@@ -410,10 +410,10 @@ describe('EmptyState', () => {
     // false negative unrelated to what this test actually checks.
     const html = await render(EmptyState, {
       fact: 'Candidate nominations open on 12 Aug.',
-      nextStep: 'Register for updates and we will tell you when they are in.',
+      nextStep: 'Check back after the notification date.',
     });
     expect(html).toContain('Candidate nominations open on 12 Aug.');
-    expect(html).toContain('Register for updates and we will tell you when they are in.');
+    expect(html).toContain('Check back after the notification date.');
   });
 });
 
@@ -459,10 +459,10 @@ describe('FormField', () => {
     const html = await render(FormField, {
       label: 'Phone',
       name: 'phone',
-      helper: 'We only use this to send you OTPs.',
+      helper: 'We only use this to reach you about your report.',
       lang: 'en',
     });
-    expect(html).toContain('We only use this to send you OTPs.');
+    expect(html).toContain('We only use this to reach you about your report.');
   });
 });
 

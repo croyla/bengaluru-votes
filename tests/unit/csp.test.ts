@@ -11,7 +11,7 @@ const MAPS_SCRIPT_SRC = 'https://maps.googleapis.com https://maps.gstatic.com';
 
 describe('src/lib/csp.ts#buildCsp', () => {
   describe('base policy', () => {
-    it.each(['/', '/account', '/api/me'])(
+    it.each(['/', '/login', '/api/flags'])(
       '%s: strict script-src with the exact nonce interpolated, no unsafe-inline',
       (pathname) => {
         const csp = buildCsp(NONCE, pathname);
@@ -22,7 +22,7 @@ describe('src/lib/csp.ts#buildCsp', () => {
     );
 
     it('worker-src allows blob: (Google Maps JS API web worker)', () => {
-      const csp = buildCsp(NONCE, '/account');
+      const csp = buildCsp(NONCE, '/login');
       expect(csp).toContain("worker-src 'self' blob:");
     });
 
@@ -32,7 +32,7 @@ describe('src/lib/csp.ts#buildCsp', () => {
     });
 
     it('frame-src is none on a non-partner path', () => {
-      const csp = buildCsp(NONCE, '/account');
+      const csp = buildCsp(NONCE, '/login');
       expect(csp).toContain("frame-src 'none'");
     });
 
@@ -96,7 +96,7 @@ describe('src/lib/csp.ts#buildCsp', () => {
       );
     });
 
-    it.each(['/account', '/api/me', '/', '/partner/some-slug'])(
+    it.each(['/login', '/api/flags', '/', '/partner/some-slug'])(
       '%s does NOT contain www.google.com in script-src',
       (pathname) => {
         const csp = buildCsp(NONCE, pathname);

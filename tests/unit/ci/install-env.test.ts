@@ -47,8 +47,8 @@ describe('install-env.sh', () => {
 });
 
 describe('bootstrap plan', () => {
-  const entries = parseManifest('NODE_ENV var required\nSESSION_SECRET secret required\nSENTRY_DSN secret optional');
-  const box = `NODE_ENV=production\nSESSION_SECRET=${SENTINEL}\nUNLISTED=1\nSENTRY_DSN=\n`;
+  const entries = parseManifest('NODE_ENV var required\nSESSION_SECRET secret required\nOPTIONAL_TOKEN secret optional');
+  const box = `NODE_ENV=production\nSESSION_SECRET=${SENTINEL}\nUNLISTED=1\nOPTIONAL_TOKEN=\n`;
   it('maps box keys to secrets and variables by the manifest and skips unlisted keys', () => {
     const p = planBootstrap(entries, box);
     expect(p.actions.map((a) => `${a.kind}:${a.name}`)).toEqual(['var:NODE_ENV', 'secret:SESSION_SECRET']);

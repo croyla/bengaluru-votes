@@ -28,8 +28,7 @@
  * part lives in src/islands/WardMap.ts, which draws the boundary from CSS
  * custom properties and adds no markers of its own.
  *
- * `=== 'true'` exactly, matching the OTP_TEST_SINK convention in
- * src/lib/otp.ts.
+ * `=== 'true'` exactly — any other value is off.
  */
 export interface MapsConfig {
   enabled: boolean;

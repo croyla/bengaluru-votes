@@ -3,7 +3,7 @@
  * architecture.md §7). Drives
  * every request through the REAL middleware (src/middleware.ts) composed
  * with the real page twin via Astro's container API, same technique as
- * tests/routes/account.test.ts — so this suite exercises the actual
+ * tests/routes/curator-ward.test.ts — so this suite exercises the actual
  * session/role/CSRF guards end to end, not just that a form happens
  * to render a token.
  *
@@ -43,7 +43,7 @@ const client = postgres(process.env.DATABASE_URL, { max: 1 });
 const db = drizzle(client, { schema });
 
 // High, task-specific ward ids (Task 34 brief) — other route suites own
-// 94xxx-99332 (see tests/routes/account.test.ts's comment); this suite owns
+// 94xxx-99332 (see the other route suites' ward-id comments); this suite owns
 // 99401-99404.
 const WARD_A = {
   id: 99401,
@@ -81,13 +81,11 @@ const ALL_WARDS = [WARD_A, WARD_B, WARD_D_NEVER_SIGNED_OFF, WARD_E_FULLY_SIGNED_
 
 const EMAILS = {
   curator: 'curator-route-test-curator@example.com',
-  citizen: 'curator-route-test-citizen@example.com',
-  submitterA: 'curator-route-test-submitter-a@example.com',
-  submitterB: 'curator-route-test-submitter-b@example.com',
+  transcriber: 'curator-route-test-transcriber@example.com',
   admin: 'curator-route-test-admin@example.com',
 };
 
-/** Strips container-API debug attributes and collapses whitespace (see tests/routes/account.test.ts). */
+/** Strips container-API debug attributes and collapses whitespace (see tests/routes/curator-ward.test.ts). */
 function normalize(html: string): string {
   return html
     .replace(/\s+data-astro-cid-\w+/g, '')
@@ -114,7 +112,7 @@ interface RunOptions {
   params?: Record<string, string>;
 }
 
-/** Drives a request through the REAL middleware and the real page twin — same technique as tests/routes/account.test.ts's `run`, plus dynamic-route `params` passthrough (tests/routes/ward.test.ts). */
+/** Drives a request through the REAL middleware and the real page twin — same technique as tests/routes/curator-ward.test.ts's `run`, plus dynamic-route `params` passthrough (tests/routes/ward.test.ts). */
 async function run(component: unknown, path: string, opts: RunOptions = {}): Promise<Response> {
   const { method = 'GET', cookieValue, fields, secFetchSite = 'same-origin', params } = opts;
   const url = new URL(path, SITE_URL);
@@ -152,7 +150,7 @@ async function sessionFor(userId: number): Promise<{ cookieValue: string; token:
 
 async function upsertUser(
   email: string,
-  role: 'citizen' | 'curator' | 'admin',
+  role: 'transcriber' | 'curator' | 'admin',
   extra: Partial<typeof schema.users.$inferInsert> = {},
 ): Promise<number> {
   const [row] = await db
@@ -180,17 +178,17 @@ async function insertPendingItem(
   wardId: number,
   candidateId: number,
   fieldKey: string,
-  submitterIds: number[],
+  submissions: number,
 ): Promise<{ id: number; targetRef: string }> {
   const targetRef = `candidate:${candidateId}:${fieldKey}`;
   const [item] = await db
     .insert(schema.flagItems)
     .values({ wardId, targetType: 'candidate_field', targetRef, status: 'pending' })
     .returning({ id: schema.flagItems.id });
-  for (const userId of submitterIds) {
+  for (let i = 0; i < submissions; i += 1) {
     await db.insert(schema.flagSubmissions).values({
       flagItemId: item!.id,
-      userId,
+      browserHash: randomUUID(),
       detail: `Curator route test flag detail for ${targetRef}`,
     });
   }
@@ -201,12 +199,10 @@ async function insertPendingItem(
 const CASES_LABEL = `Curator Route Test Candidate — ${t('en', 'candidate.field.cases')}`;
 
 let curatorId: number;
-let citizenId: number;
-let submitterAId: number;
-let submitterBId: number;
+let transcriberId: number;
 let adminId: number;
 let curatorAuth: { cookieValue: string; token: string };
-let citizenAuth: { cookieValue: string; token: string };
+let transcriberAuth: { cookieValue: string; token: string };
 let adminAuth: { cookieValue: string; token: string };
 
 let candidateA: number; // in WARD_A — hosts every reject fixture field below
@@ -220,13 +216,18 @@ let itemCsrf: { id: number; targetRef: string };
 let itemAlreadyResolved: { id: number; targetRef: string };
 
 async function resetFixtures(): Promise<void> {
-  const userIds = [curatorId, citizenId, submitterAId, submitterBId, adminId].filter(
+  const userIds = [curatorId, transcriberId, adminId].filter(
     (v): v is number => typeof v === 'number',
   );
   if (userIds.length > 0) {
-    await db.delete(schema.flagSubmissions).where(inArray(schema.flagSubmissions.userId, userIds));
     await db.delete(schema.sessions).where(inArray(schema.sessions.userId, userIds));
   }
+  await db.delete(schema.flagSubmissions).where(
+    inArray(
+      schema.flagSubmissions.flagItemId,
+      db.select({ id: schema.flagItems.id }).from(schema.flagItems).where(inArray(schema.flagItems.wardId, ALL_WARDS.map((w) => w.id))),
+    ),
+  );
   await db.delete(schema.flagItems).where(inArray(schema.flagItems.wardId, ALL_WARDS.map((w) => w.id)));
   if (typeof candidateA === 'number' || typeof candidateB === 'number') {
     const candidateIds = [candidateA, candidateB].filter((v): v is number => typeof v === 'number');
@@ -259,25 +260,23 @@ describe('/curator, /curator/queue, /curator/queue/{id} (Task 34)', () => {
     // any stale flag/candidate rows a PRIOR run left behind under
     // these same ids, before inserting this run's fresh fixtures.
     curatorId = await upsertUser(EMAILS.curator, 'curator');
-    citizenId = await upsertUser(EMAILS.citizen, 'citizen');
-    submitterAId = await upsertUser(EMAILS.submitterA, 'citizen');
-    submitterBId = await upsertUser(EMAILS.submitterB, 'citizen');
+    transcriberId = await upsertUser(EMAILS.transcriber, 'transcriber');
     adminId = await upsertUser(EMAILS.admin, 'admin');
     await resetFixtures();
 
     curatorAuth = await sessionFor(curatorId);
-    citizenAuth = await sessionFor(citizenId);
+    transcriberAuth = await sessionFor(transcriberId);
     adminAuth = await sessionFor(adminId);
 
     candidateA = await insertCandidate(WARD_A.id);
     candidateB = await insertCandidate(WARD_B.id);
 
-    itemWardB = await insertPendingItem(WARD_B.id, candidateB, 'cases', [submitterAId]);
-    itemDedupe = await insertPendingItem(WARD_A.id, candidateA, 'cases', [submitterAId, submitterBId]);
-    itemRejectEmpty = await insertPendingItem(WARD_A.id, candidateA, 'assets', [submitterAId]);
-    itemRejectValid = await insertPendingItem(WARD_A.id, candidateA, 'education', [submitterAId]);
-    itemCsrf = await insertPendingItem(WARD_A.id, candidateA, 'track_record', [submitterAId]);
-    itemAlreadyResolved = await insertPendingItem(WARD_A.id, candidateA, 'approachability', [submitterAId]);
+    itemWardB = await insertPendingItem(WARD_B.id, candidateB, 'cases', 1);
+    itemDedupe = await insertPendingItem(WARD_A.id, candidateA, 'cases', 2);
+    itemRejectEmpty = await insertPendingItem(WARD_A.id, candidateA, 'assets', 1);
+    itemRejectValid = await insertPendingItem(WARD_A.id, candidateA, 'education', 1);
+    itemCsrf = await insertPendingItem(WARD_A.id, candidateA, 'track_record', 1);
+    itemAlreadyResolved = await insertPendingItem(WARD_A.id, candidateA, 'approachability', 1);
   });
 
   afterAll(async () => {
@@ -455,8 +454,8 @@ describe('/curator, /curator/queue, /curator/queue/{id} (Task 34)', () => {
   });
 
   describe('role guard (src/middleware.ts, Task 26)', () => {
-    it('a citizen hitting /curator -> 403', async () => {
-      const res = await run(CuratorIndex, '/curator', { cookieValue: citizenAuth.cookieValue });
+    it('a transcriber hitting /curator -> 403', async () => {
+      const res = await run(CuratorIndex, '/curator', { cookieValue: transcriberAuth.cookieValue });
       expect(res.status).toBe(403);
     });
   });
@@ -473,8 +472,8 @@ describe('/curator, /curator/queue, /curator/queue/{id} (Task 34)', () => {
       expect(html).toContain('<meta name="robots" content="noindex"');
     });
 
-    it('refuses a citizen', async () => {
-      expect((await run(GuideRoute, '/curator/guide', { cookieValue: citizenAuth.cookieValue })).status).toBe(403);
+    it('refuses a transcriber', async () => {
+      expect((await run(GuideRoute, '/curator/guide', { cookieValue: transcriberAuth.cookieValue })).status).toBe(403);
     });
 
     it('links to every section from the bar', async () => {

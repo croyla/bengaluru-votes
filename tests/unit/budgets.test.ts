@@ -16,24 +16,21 @@ if (!process.env.DATABASE_URL) {
 const client = postgres(process.env.DATABASE_URL, { max: 1 });
 const db = drizzle(client, { schema });
 
-// Both buckets point at the same `kind`: with only three `budget_kind`
-// enum values total, and two of them now genuinely owned by a feature that
-// resets/asserts on them in its own test file (geocode.test.ts owns
-// 'geocode'; tests/unit/otp.test.ts and tests/routes/otp.test.ts own
-// 'otp_send', reset in their own beforeEach — Task 25), 'news_query' is the
-// only value left with no other owner. That's safe here because every test
-// below is preceded by a `beforeEach` that deletes today's row for this
-// kind, and tests within one file run strictly sequentially (no
-// `test.concurrent`), so KIND_A and KIND_B never actually need to be
-// distinct — the two names exist only for readability at each call site.
-const KIND_A = 'news_query' as const;
-const KIND_B = 'news_query' as const;
+// Both buckets point at the same `kind`: 'anonymous_vote' is the one
+// `budget_kind` value no other test file asserts on (geocode tests own
+// 'geocode', booth-lookup.test.ts owns 'epic_lookup'). That's safe here because every test below is preceded by a
+// `beforeEach` that deletes today's row for this kind, and tests within one
+// file run strictly sequentially (no `test.concurrent`), so KIND_A and
+// KIND_B never actually need to be distinct — the two names exist only for
+// readability at each call site.
+const KIND_A = 'anonymous_vote' as const;
+const KIND_B = 'anonymous_vote' as const;
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function readCount(kind: 'otp_send' | 'news_query'): Promise<number | null> {
+async function readCount(kind: typeof KIND_A): Promise<number | null> {
   const [row] = await db
     .select({ count: schema.budgetCounters.count })
     .from(schema.budgetCounters)
@@ -47,6 +44,7 @@ describe('consumeBudget / budgetRemaining', () => {
   });
 
   afterAll(async () => {
+    await db.delete(schema.budgetCounters).where(eq(schema.budgetCounters.kind, KIND_A));
     await client.end();
   });
 

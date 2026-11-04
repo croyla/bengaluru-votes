@@ -583,4 +583,3 @@ All files in `src/components/` plus the shared islands in `src/islands/`. “Unu
 | `WardSectionNav.ts` | Current-section tracking for section navigation | — | §7.15 |
 | `TranscribeForm.ts` | Transcriber screen: disables inputs per status, assets total, hold countdown | — | §7.10 |
 | `CopyButton.ts` | One-tap copy over readonly fields (partner kit only) | `data-copy-button`, `data-copy-target` | — |
-| `RegisterLoginModal.astro` / `.ts`, `MeSlot.ts` | Dormant code slated for removal (architecture §15). Do not build on it | — | — |

@@ -7,8 +7,10 @@
  * manage.
  *
  * COVERAGE MAP:
- *   - grantRole: citizen -> curator role update.
- *   - revokeRole: a curator -> role 'citizen'.
+ *   - grantRole: transcriber -> curator role update.
+ *   - revokeRole: removes the account and its sessions, or erases it
+ *     (email nulled, status 'erased') when a transcription assignment
+ *     still references it.
  *   - ADMIN-ONLY: every mutator rejects a non-admin actor before touching
  *     the DB.
  */
@@ -17,6 +19,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { and, eq, inArray, ne } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import * as schema from '../../src/db/schema';
 
 if (!process.env.DATABASE_URL) {
@@ -40,11 +43,11 @@ const db = drizzle(client, { schema });
 
 const EMAILS = {
   admin: 'admin-lib-test-admin@example.com',
-  citizen: 'admin-lib-test-citizen@example.com',
-  // A second, never-promoted citizen — `citizen` above IS promoted to
+  promoted: 'admin-lib-test-promoted@example.com',
+  // A second, never-promoted transcriber — `promoted` above IS promoted to
   // curator by the grantRole test, so it can't also serve as the
   // non-admin actor in the ADMIN-ONLY checks below.
-  plainCitizen: 'admin-lib-test-plain-citizen@example.com',
+  plainTranscriber: 'admin-lib-test-plain-transcriber@example.com',
   curatorA: 'admin-lib-test-curator-a@example.com',
   curatorB: 'admin-lib-test-curator-b@example.com',
   // Lockout-prevention guard fixtures (Task 44 review) — created/cleaned up
@@ -57,11 +60,12 @@ const EMAILS = {
   addTranscriber: 'admin-lib-test-add-transcriber@example.com',
   addCurator: 'admin-lib-test-add-curator@example.com',
   addAdmin: 'admin-lib-test-add-admin@example.com',
-  addExistingCitizen: 'admin-lib-test-add-existing-citizen@example.com',
+  addExisting: 'admin-lib-test-add-existing@example.com',
   grantTranscriber: 'admin-lib-test-grant-transcriber@example.com',
+  assignedTranscriber: 'admin-lib-test-assigned-transcriber@example.com',
 };
 
-async function upsertUser(email: string, role: 'citizen' | 'transcriber' | 'curator' | 'admin'): Promise<number> {
+async function upsertUser(email: string, role: 'transcriber' | 'curator' | 'admin'): Promise<number> {
   const [row] = await db
     .insert(schema.users)
     .values({ email: email.toLowerCase(), role, status: 'active' })
@@ -71,8 +75,8 @@ async function upsertUser(email: string, role: 'citizen' | 'transcriber' | 'cura
 }
 
 let adminId: number;
-let citizenId: number;
-let plainCitizenId: number;
+let promotedId: number;
+let plainTranscriberId: number;
 let curatorAId: number;
 let curatorBId: number;
 let admin: AdminActor;
@@ -85,8 +89,8 @@ describe('src/lib/admin.ts (Task 44)', () => {
     await migrate(db, { migrationsFolder: './drizzle' });
 
     adminId = await upsertUser(EMAILS.admin, 'admin');
-    citizenId = await upsertUser(EMAILS.citizen, 'citizen');
-    plainCitizenId = await upsertUser(EMAILS.plainCitizen, 'citizen');
+    promotedId = await upsertUser(EMAILS.promoted, 'transcriber');
+    plainTranscriberId = await upsertUser(EMAILS.plainTranscriber, 'transcriber');
     curatorAId = await upsertUser(EMAILS.curatorA, 'curator');
     curatorBId = await upsertUser(EMAILS.curatorB, 'curator');
 
@@ -95,46 +99,76 @@ describe('src/lib/admin.ts (Task 44)', () => {
 
   afterAll(async () => {
     const userIds = [
-      citizenId,
-      plainCitizenId,
+      promotedId,
+      plainTranscriberId,
       curatorAId,
       curatorBId,
       ...extraFixtureIds,
     ];
+    await db.delete(schema.sessions).where(inArray(schema.sessions.userId, [adminId, ...userIds]));
     await db.delete(schema.users).where(inArray(schema.users.id, [adminId, ...userIds]));
     await client.end();
   });
 
   describe('grantRole', () => {
-    it('promotes a citizen to curator', async () => {
-      await grantRole(admin, citizenId, 'curator');
+    it('promotes a transcriber to curator', async () => {
+      await grantRole(admin, promotedId, 'curator');
 
-      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId));
+      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, promotedId));
       expect(row?.role).toBe('curator');
 
     });
 
     it('rejects a non-admin actor without touching the DB', async () => {
-      const before = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId));
+      const before = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, promotedId));
       const curatorActor = { userId: curatorAId, role: 'curator' } as unknown as AdminActor;
-      await expect(grantRole(curatorActor, citizenId, 'admin')).rejects.toThrow();
-      const after = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId));
+      await expect(grantRole(curatorActor, promotedId, 'admin')).rejects.toThrow();
+      const after = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, promotedId));
       expect(after[0]?.role).toBe(before[0]?.role);
     });
   });
 
   describe('revokeRole', () => {
-    it('demotes a curator to citizen', async () => {
+    it("removes a curator's account and every session it had", async () => {
+      await db.insert(schema.sessions).values({ id: randomUUID(), userId: curatorAId, expiresAt: new Date(Date.now() + 3600_000) });
+
       await revokeRole(admin, curatorAId);
 
-      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, curatorAId));
-      expect(row?.role).toBe('citizen');
+      expect(await db.select().from(schema.users).where(eq(schema.users.id, curatorAId))).toHaveLength(0);
+      expect(await db.select().from(schema.sessions).where(eq(schema.sessions.userId, curatorAId))).toHaveLength(0);
+    });
+
+    it('erases instead of deleting an account a transcription assignment still points at', async () => {
+      const assignedId = await upsertUser(EMAILS.assignedTranscriber, 'transcriber');
+      extraFixtureIds.push(assignedId);
+      const bytes = Buffer.from(`%PDF-1.4 admin lib test ${randomUUID()}`);
+      const [m] = await db
+        .insert(schema.media)
+        .values({ bytes, contentType: 'application/pdf', sha256: randomUUID(), size: bytes.length })
+        .returning({ id: schema.media.id });
+      const [a] = await db.insert(schema.candidateAffidavits).values({ mediaId: m!.id }).returning({ id: schema.candidateAffidavits.id });
+      await db.insert(schema.transcriptionAssignments).values({ affidavitId: a!.id, transcriberId: assignedId, expiresAt: new Date(Date.now() + 3600_000) });
+      await db.insert(schema.sessions).values({ id: randomUUID(), userId: assignedId, expiresAt: new Date(Date.now() + 3600_000) });
+
+      try {
+        await revokeRole(admin, assignedId);
+
+        const [row] = await db.select().from(schema.users).where(eq(schema.users.id, assignedId));
+        expect(row?.email).toBeNull();
+        expect(row?.status).toBe('erased');
+        expect(await db.select().from(schema.sessions).where(eq(schema.sessions.userId, assignedId))).toHaveLength(0);
+        const assignments = await db.select().from(schema.transcriptionAssignments).where(eq(schema.transcriptionAssignments.transcriberId, assignedId));
+        expect(assignments).toHaveLength(1);
+      } finally {
+        await db.delete(schema.candidateAffidavits).where(eq(schema.candidateAffidavits.id, a!.id));
+        await db.delete(schema.media).where(eq(schema.media.id, m!.id));
+      }
     });
 
     it('rejects a non-admin actor without touching the DB', async () => {
       const before = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, curatorBId));
-      const citizenActor = { userId: plainCitizenId, role: 'citizen' } as unknown as AdminActor;
-      await expect(revokeRole(citizenActor, curatorBId)).rejects.toThrow();
+      const transcriberActor = { userId: plainTranscriberId, role: 'transcriber' } as unknown as AdminActor;
+      await expect(revokeRole(transcriberActor, curatorBId)).rejects.toThrow();
       const after = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, curatorBId));
       expect(after[0]?.role).toBe(before[0]?.role);
     });
@@ -180,8 +214,7 @@ describe('src/lib/admin.ts (Task 44)', () => {
 
       await revokeRole(admin, extraAdminId);
 
-      const [extra] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, extraAdminId));
-      expect(extra?.role).toBe('citizen');
+      expect(await db.select().from(schema.users).where(eq(schema.users.id, extraAdminId))).toHaveLength(0);
       const [primary] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, adminId));
       expect(primary?.role).toBe('admin');
     });
@@ -195,7 +228,7 @@ describe('src/lib/admin.ts (Task 44)', () => {
         .from(schema.users)
         .where(and(eq(schema.users.role, 'admin'), eq(schema.users.status, 'active'), ne(schema.users.id, adminId)));
       for (const row of others) {
-        await db.update(schema.users).set({ role: 'citizen' }).where(eq(schema.users.id, row.id));
+        await db.update(schema.users).set({ role: 'curator' }).where(eq(schema.users.id, row.id));
       }
 
       const bannedAdminId = await upsertUser(EMAILS.bannedAdmin, 'admin');
@@ -223,7 +256,7 @@ describe('src/lib/admin.ts (Task 44)', () => {
   });
 
   describe('addUser', () => {
-    const ADDED = [EMAILS.addTranscriber, EMAILS.addCurator, EMAILS.addAdmin, EMAILS.addExistingCitizen];
+    const ADDED = [EMAILS.addTranscriber, EMAILS.addCurator, EMAILS.addAdmin, EMAILS.addExisting];
 
     afterAll(async () => {
       await db.delete(schema.users).where(inArray(schema.users.email, ADDED));
@@ -239,7 +272,6 @@ describe('src/lib/admin.ts (Task 44)', () => {
       expect(row?.email).toBe(email);
       expect(row?.role).toBe(role);
       expect(row?.status).toBe('active');
-      expect(row?.phone).toBeNull();
     });
 
     it('trims and lower-cases the email before storing it', async () => {
@@ -256,11 +288,11 @@ describe('src/lib/admin.ts (Task 44)', () => {
       },
     );
 
-    it('an email that already exists (as a citizen, typed in different case) -> user_exists, role untouched', async () => {
-      const existingId = await upsertUser(EMAILS.addExistingCitizen, 'citizen');
-      await expect(addUser(admin, EMAILS.addExistingCitizen.toUpperCase(), 'admin')).rejects.toThrow('user_exists');
+    it('an email that already exists (typed in different case) -> user_exists, role untouched', async () => {
+      const existingId = await upsertUser(EMAILS.addExisting, 'transcriber');
+      await expect(addUser(admin, EMAILS.addExisting.toUpperCase(), 'admin')).rejects.toThrow('user_exists');
       const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, existingId));
-      expect(row?.role).toBe('citizen');
+      expect(row?.role).toBe('transcriber');
     });
 
     it('rejects a non-admin actor and creates nothing', async () => {
@@ -276,7 +308,7 @@ describe('src/lib/admin.ts (Task 44)', () => {
     let transcriberId: number;
 
     beforeAll(async () => {
-      transcriberId = await upsertUser(EMAILS.grantTranscriber, 'citizen');
+      transcriberId = await upsertUser(EMAILS.grantTranscriber, 'curator');
       extraFixtureIds.push(transcriberId);
     });
 
@@ -285,7 +317,7 @@ describe('src/lib/admin.ts (Task 44)', () => {
       expect(['citizen', '', 'ADMIN', 'superuser'].some(isStaffRole)).toBe(false);
     });
 
-    it('grantRole promotes a citizen to transcriber', async () => {
+    it('grantRole moves a curator to transcriber', async () => {
       await grantRole(admin, transcriberId, 'transcriber');
       const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, transcriberId));
       expect(row?.role).toBe('transcriber');

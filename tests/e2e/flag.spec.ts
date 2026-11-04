@@ -6,8 +6,8 @@
  * share a session):
  *   1. An anonymous citizen flags the seeded
  *      candidate's `age` field, suggesting a correction.
- *   2. The seeded curator (already-registered contact, plain OTP login on
- *      the /login page)
+ *   2. The seeded curator (signs in on the /login page with the shared
+ *      staff password)
  *      opens the queue item this flag created, types the corrected age into
  *      the structured fix form beside the affidavit, ticks the confirmation
  *      and PUBLISHES it.
@@ -30,7 +30,7 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { and, desc, eq } from 'drizzle-orm';
 import { seedFixtures } from './support/fixtures';
-import { readLatestOtpCode } from './support/otp-sink';
+import { E2E_MASTER_PASSWORD } from './support/master-password';
 import { db } from './support/db';
 import { candidateFields, flagItems } from '../../src/db/schema';
 
@@ -86,7 +86,7 @@ async function findPendingFlagItemId(): Promise<number> {
 }
 
 test('citizen flags a candidate field, curator accepts + publishes, correction goes live', async ({ browser }) => {
-  // Curator OTP login plus
+  // Curator sign-in plus
   // three separate browser contexts/page loads — comfortably over the
   // default 30s budget on a slower run.
   test.setTimeout(60_000);
@@ -104,7 +104,7 @@ test('citizen flags a candidate field, curator accepts + publishes, correction g
 
   await citizenPage.locator('[data-flag-action]').click();
 
-  // Reporting is anonymous: no registration/OTP step.
+  // Reporting is anonymous: no sign-in step.
   const flagDialog = citizenPage.locator('[data-flag-modal]');
   await expect(flagDialog).toBeVisible();
 
@@ -126,13 +126,10 @@ test('citizen flags a candidate field, curator accepts + publishes, correction g
 
   await curatorPage.goto('/curator/queue');
   // No session yet -> middleware redirects to /login?next=... ; sign in
-  // with the already-registered curator contact through that page's own
-  // two forms (contact, then the code). The app bar no longer carries a
-  // sign-in control, so there is no modal to open here.
+  // as the seeded curator with the shared staff password.
   await expect(curatorPage).toHaveURL(/\/login/);
   await curatorPage.locator('main input[name="destination"]').fill(seedFixtures.curatorEmail);
-  await curatorPage.locator('main button[type="submit"]').click();
-  await curatorPage.locator('main input[name="code"]').fill(await readLatestOtpCode(seedFixtures.curatorEmail));
+  await curatorPage.locator('main input[name="password"]').fill(E2E_MASTER_PASSWORD);
   await curatorPage.locator('main button[type="submit"]').click();
   await expect(curatorPage).toHaveURL(/\/curator\/queue$/);
 

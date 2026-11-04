@@ -7,7 +7,7 @@ first if anything below seems to assume context.
 
 This is the **committed anchor** for how the box gets built, what secrets it
 needs, and the handful of admin actions that only make sense against a live
-deployment (OTP cooldown-clear, rollback, restore rehearsal). Exact
+deployment (rollback, restore rehearsal). Exact
 commands, not prose — copy-paste, adjusting the bracketed placeholders.
 
 **Production is the only environment.** Staging was retired on 2026-09-18 and
@@ -45,9 +45,8 @@ when staging existed; it is history, not instruction.
   §16). There is no restic target, so step 6 below
   cannot be completed and the platform runs with no off-box backup. This is
   a launch blocker, not a nice-to-have.
-- The vendor accounts this app talks to — SendGrid, Twilio, Google Cloud
-  (Geocoding + Programmable Search), Anthropic, reCAPTCHA v3, Google
-  Analytics, Sentry, healthchecks.io. **None are available as of
+- The vendor accounts this app talks to — Google Cloud (Geocoding, Maps
+  JS, Places), Anthropic, reCAPTCHA v3, Google Analytics, healthchecks.io. **None are available as of
   2026-08-13.** Each absence degrades to a documented no-op rather than an
   error (see the env table below for what each one costs), so provisioning
   proceeds without them.
@@ -438,14 +437,8 @@ here in the same PR.
 | `DATABASE_URL` | yes | `postgres://<user>:<pass>@postgres:5432/<db>` — must match the `POSTGRES_*` values below. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | yes | Read by the `postgres:16` image itself to initialize, and by its healthcheck (`pg_isready -U ... -d ...`). Keep in sync with `DATABASE_URL`. |
 | `SITE_ORIGIN` | yes | `https://bengaluruvotes.opencity.in` — same-origin check in `src/middleware.ts` for unsafe methods, and CSP/absolute-URL building. |
-| `SESSION_SECRET` | yes | 32+ random bytes (e.g. `openssl rand -hex 32`). HMACs session cookies and peppers OTP code hashes (`src/lib/session.ts`, `src/lib/otp.ts`). App refuses to start without it when `NODE_ENV=production`. |
-| `MASTER_PASSWORD` | **temporary** — set until email works for OTP | `src/lib/master-login.ts`. When set (16+ characters, else the app throws on every request), `/login` becomes an email-or-phone plus password form, anyone holding the password can sign in as **any existing active account**, `/api/otp/*` answers 404 and citizen registration is hidden. Unset it to return to OTP. Generate with `openssl rand -hex 16`; avoid `#`, `$` and quotes, which env files can mangle. Shared by everyone who has it: removing one person means rotating it for all. **A value shorter than 16 characters makes EVERY page fail, public pages and `/healthz` included.** The only ways to turn the mechanism off are to delete the line or leave the value empty; `false`, `0` and `off` are all just (too short) passwords. Sign-in posts are limited to 5 a minute per client, and the excess gets a 429. |
-| `SENDGRID_API_KEY` | yes (real sends) | Email OTP + campaign sends (`src/lib/send/sendgrid.ts`). |
-| `SENDGRID_FROM_EMAIL` | yes (real sends) | Verified sender address for SendGrid. |
-| `SENDGRID_WEBHOOK_PUBLIC_KEY` | yes (real sends) | Verifies SendGrid's event-webhook signature (`src/pages/api/webhooks/sendgrid.ts`). |
-| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` | yes (WhatsApp) | WhatsApp OTP/campaign sends (`src/lib/send/twilio.ts`). |
-| `TWILIO_WHATSAPP_FROM` | yes (WhatsApp) | The approved WhatsApp sending number. |
-| `TWILIO_OTP_TEMPLATE_SID` | yes (WhatsApp OTP) | Approved WhatsApp OTP Content API template SID (`src/lib/otp.ts`) — unset until WhatsApp onboarding completes; until then WhatsApp OTP requests degrade to `send_failed` by design. |
+| `SESSION_SECRET` | yes | 32+ random bytes (e.g. `openssl rand -hex 32`). HMACs session cookies (`src/lib/session.ts`). App refuses to start without it when `NODE_ENV=production`. |
+| `MASTER_PASSWORD` | yes — the only staff sign-in | `src/lib/master-login.ts`. `/login` takes an existing active staff account's email plus this password; anyone holding it can sign in as **any existing active staff account**. Unset or empty means nobody can sign in. Generate with `openssl rand -hex 16`; avoid `#`, `$` and quotes, which env files can mangle. Shared by everyone who has it: removing one person means rotating it for all (or removing their account at `/admin/users`). **A value shorter than 16 characters makes EVERY page fail, public pages and `/healthz` included.** `false`, `0` and `off` are just (too short) passwords. Sign-in posts are limited to 5 a minute per client, and the excess gets a 429. |
 | `GOOGLE_GEOCODING_API_KEY` | yes — the ONLY path to a ward | Google Geocoding API. Pincode lookup was removed 2026-08-14, so this is the sole path from an address to a ward, with no fallback. Unset (or Google unreachable) means every lookup returns `unavailable`. |
 | `GEOCODE_DAILY_BUDGET` | recommended | Daily geocode call cap (architecture §13 cost-amplification guard). **Exhausting it now takes ward lookup DOWN** — pincode lookup was removed 2026-08-14 and there is no fallback left. Default 2000/day. |
 | `ELECTORAL_API_ORIGIN` | optional | Origin of the BBMP electoral API behind booth-lookup-by-EPIC (`src/lib/electoral-api.ts`). Defaults to `https://electoralapi.bbmpgov.in`. **There is no key** — it is a public, unauthenticated endpoint, so there is nothing to omit and no "unset degrades to a no-op" case here; override it only to point staging or a test at something else. |
@@ -460,31 +453,15 @@ here in the same PR.
 | `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET_KEY` | yes (anonymous writes) | reCAPTCHA v3 on `POST /api/eoi` and `PUT /api/issue-votes`; tokens are bound to distinct actions. |
 | `ANONYMOUS_VOTE_DAILY_BUDGET` | recommended (default `50000`) | City-wide daily circuit breaker for anonymous issue ballots, in addition to the per-IP nginx limit. Exhaustion pauses new ballots until the next UTC day. |
 | `GA_MEASUREMENT_ID` | production only — `G-PZQJ1ZSCN0` | Google Analytics — gates the one inline GA script tag in `Base.astro`; unset means GA is simply absent (no error). Set on production 2026-08-14; set only in `.env.production`, so local traffic never enters the property. The id is public (it ships in the HTML), so it lives here rather than in a credential store. Read at request time — changing it needs a container recreate, not a rebuild. |
-| `OTP_DAILY_SEND_BUDGET` | recommended (default `5000`) | Global daily OTP-send budget across all destinations (architecture §13). |
-| `OTP_TEST_SINK` | **must NOT be set** | `src/lib/otp.ts` — when exactly `'true'`, writes every plaintext OTP code to a `otp_test_codes` table so the Playwright e2e suite can read codes without in-process access. The source comment is explicit: this must NEVER be set in production or staging. Leave unset in both `.env` files. |
-| `RETENTION_ENABLED` | yes — **must be `false`** | DPDP retention enforcement (`jobs/retention.ts`) ships disabled pending legal sign-off (`docs/architecture.md` Open questions) on the retention period. Do not flip to `true` without that sign-off. |
-| `RETENTION_PERIOD_DAYS` | only if `RETENTION_ENABLED=true` | Days after results-declared before erasure. |
-| `RETENTION_ACTOR_USER_ID` | only if `RETENTION_ENABLED=true` | The admin user id attributed as actor on the erasure job's audit-log rows. |
 | `RESTIC_REPOSITORY` | **blocked** | No target chosen — `docs/architecture.md` §16. Leave unset; scripts/backup.sh fails loudly nightly until it exists. |
 | `RESTIC_PASSWORD` (or `RESTIC_PASSWORD_FILE`) | yes (jobs) | restic repository encryption password. Unset until a backup target is chosen (`docs/architecture.md` §16). Custody: `docs/architecture.md` §13 (Secrets). |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | yes (jobs) | Credentials for whatever S3-compatible backup storage is chosen (`docs/architecture.md` §10, §16) (restic's s3 backend reads the standard AWS_* vars). Unset today. |
 | `HEALTHCHECKS_URL` | yes (jobs) | healthchecks.io ping URL — the nightly backup dead-man's-switch. Only meaningful once backups exist (`docs/architecture.md` §16). |
-| `SENTRY_DSN` | recommended | Server-side error reporting (`src/lib/logger.ts`) — **unset means Sentry is a clean no-op**, not a broken deploy; set it once the free-tier project exists. |
 | `IMAGE_TAG` | optional, not stored in the `.env` file | Selects which **local** image tag the stack runs (`deploy/compose.production.yml`'s `${IMAGE_TAG:-latest}`). Left unset for a normal deploy; it exists so a rollback can point the stack at `:previous` without rebuilding. |
 
-### `SENDS_DISABLED` — never on production
+### Rotating the master password
 
-`SENDS_DISABLED=true` makes the campaign runner (`src/lib/send/calendar.ts`)
-log instead of sending. It exists for the local stack
-(`deploy/compose.local.yml`), where it guarantees nothing can message a real
-person. It must not be set in `.env.production`. (The staging environment
-that used to carry it, with vendor keys omitted, was retired on 2026-09-18.)
-
-### Rotating or removing the master password (temporary)
-
-The master password exists only until email works for OTP.
-
-Rotate (also how you remove one person's access):
+Rotate (also how you remove one person's access, besides removing their account at `/admin/users`):
 
 1. `openssl rand -hex 16`, and put the new value in `MASTER_PASSWORD` in `.env.production`.
 2. Restart the app:
@@ -498,8 +475,6 @@ Rotate (also how you remove one person's access):
 
 3. Verify: `curl -fsS https://bengaluruvotes.opencity.in/healthz`. A value shorter than 16 characters makes EVERY page fail, public pages and `/healthz` included, and `up -d app` does not check health for you. If the check fails, fix the line and repeat step 2.
 4. Share the new value out of band. Existing sessions stay valid for up to an hour of activity; to end them now, ban and reactivate the account at `/admin/users`, or rotate `SESSION_SECRET`, which signs everyone out.
-
-Remove (when email OTP works): delete the `MASTER_PASSWORD` line (or leave the value empty; `false`, `0` and `off` do NOT turn it off, they are just too-short passwords that take the whole site down), run the step 2 commands above, check `curl -fsS https://bengaluruvotes.opencity.in/healthz`, and confirm `/login` asks for a code again.
 
 First admin on a fresh box (same preamble as step 2 above):
 
@@ -601,47 +576,6 @@ curl -sS -X POST https://<host>/api/ward-lookup \
 
 ---
 
-## OTP cooldown-clear (architecture §13)
-
-**Why this exists:** the per-destination OTP send cooldowns (1/minute,
-5/hour, a 10-per-day cap — `src/lib/otp.ts`) are themselves a
-targeted-DoS vector: anyone who knows a curator's or admin's email/phone
-can burn that destination's send budget on purpose, locking the *real*
-owner out of getting a **fresh** code (their **existing, unconsumed** code
-is untouched and still valid — cooldowns block new sends, never login).
-The runbook answer is to clear the cooldown, never to invalidate whatever
-code is already sitting in the real owner's inbox.
-
-**Mechanism:** the cooldown counters in `requestOtp` (`src/lib/otp.ts`) are
-computed from `otp_codes.created_at` timestamps for that destination inside
-trailing 1-minute / 1-hour / 24-hour windows — there is no separate
-"cooldown state" table. Clearing it means pushing every row's `created_at`
-for that destination outside all three windows **without** touching
-`code_hash`, `expires_at`, or `consumed_at` — so any still-valid,
-unconsumed code keeps working exactly as it did before (its expiry was
-computed from `now + 10 minutes` at creation time, independent of
-`created_at`):
-
-`$POSTGRES_USER`/`$POSTGRES_DB` must expand **inside the container**, where
-the postgres image's own env actually holds them — not in your local shell,
-where they're unset and would silently mangle the command into `psql -U ""
--d ""`. Wrap the psql call in `sh -c '...'` so expansion happens on the
-container side:
-
-```sh
-docker compose -p bengaluru-votes-production -f deploy/compose.production.yml exec postgres \
-  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "UPDATE otp_codes SET created_at = created_at - INTERVAL '\''25 hours'\'' WHERE destination = '\''<normalized-destination>'\'';"'
-```
-
-Use the **normalized** destination exactly as `src/lib/otp.ts#normalizeDestination`
-would produce it — trimmed + lowercased for an email address (`trim().toLowerCase()`), trimmed only for a phone number — since that's what's actually stored in `otp_codes.destination`.
-
-Verify the fix by attempting a fresh OTP request for that destination
-immediately after — it should return `'sent'` again rather than
-`'already_sent'`.
-
----
-
 ## k6 election-day load test (architecture §12; Task 65)
 
 **Why this exists:** one k6 run is the acceptance test for the whole
@@ -666,7 +600,7 @@ ways to run it:
 2. Run it against the **production** hostname during a
    pre-announcement or off-peak window (before public traffic exists, or
    late night), accepting the small residual risk. The script never touches
-   OTP, votes, flags, or media endpoints, which keeps most of its traffic
+   votes, flags, or media endpoints, which keeps most of its traffic
    low-risk — but its `/api/ward-lookup` traffic is **not** low-risk any
    more. `tests/load/k6-election-day.js` was written when the endpoint was
    only ever called in pincode mode (`src/lib/pincode.ts` — a pure in-memory
@@ -763,9 +697,7 @@ $C stop extract-worker         # stops claiming, lets calls in flight finish
 
 - **Secret rotation:** custody — architecture §13 (Secrets); no rotation
   cadence is written down. Rotating `SESSION_SECRET` invalidates every live session (everyone
-  is logged out) and re-peppers future OTP hashes only (old unconsumed
-  codes hashed under the old pepper stop verifying — acceptable, they're
-  10-minute-lived).
+  is logged out).
 - **Breach response:** DPDP Act notification obligations (Data Protection
   Board + affected data principals) — no named owner or procedure yet
   (architecture §13, §16).
@@ -876,6 +808,6 @@ Siva/admin should inspect the `/admin` report counters and oldest pending report
 
 For an attack, set `FLAGS_SUBMISSIONS_PAUSED=true` in the production env file and recreate the app with the existing production Compose command (`docker compose -f deploy/compose.production.yml up -d --no-deps app`, using the usual env-file/tag overrides). Confirm a real POST returns 503 and curator pages remain usable. Remove/set false and recreate to resume; verify a real browser report. Configuration changes are runtime changes, except the existing build-time origin rules still apply.
 
-`flag-cleanup.ts` runs daily at 06:15 in the jobs container's timezone, independently of `RETENTION_ENABLED`. It clears browser/report linkage after 30 days, network hashes after 48 hours, closed duplicate/value fingerprints after 7 days, request buckets after 48 hours and aggregate counters after 30 days. Expiry is enforced by admission queries; physical deletion happens by the next successful run. Check `/var/log/gba-jobs/flag-cleanup.log` for success; replay with `tsx jobs/flag-cleanup.ts` in the jobs container if needed. Report text and existing account associations follow the existing policy, not this short-lived cleanup.
+`flag-cleanup.ts` runs daily at 06:15 in the jobs container's timezone. It clears browser/report linkage after 30 days, network hashes after 48 hours, closed duplicate/value fingerprints after 7 days, request buckets after 48 hours and aggregate counters after 30 days. Expiry is enforced by admission queries; physical deletion happens by the next successful run. Check `/var/log/gba-jobs/flag-cleanup.log` for success; replay with `tsx jobs/flag-cleanup.ts` in the jobs container if needed. Report text and existing account associations follow the existing policy, not this short-lived cleanup.
 
 Existing nginx access logs may contain raw IPs. The official nginx image normally directs access/error logs to stdout/stderr and Compose rotates JSON logs at 10 MB × 5 files; this is a size bound, not a fixed time retention. Verify deployed symlinks/log driver before finalizing the privacy policy. Do not claim the entire system stores no raw IPs.

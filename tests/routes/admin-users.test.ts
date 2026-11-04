@@ -4,21 +4,21 @@
  * container API — same technique as tests/routes/admin-console.test.ts.
  *
  * COVERAGE MAP:
- *   - ADMIN-ONLY: a curator or a citizen hitting the route -> 403; an
+ *   - ADMIN-ONLY: a curator or a transcriber hitting the route -> 403; an
  *     anonymous request redirects to /login.
- *   - LIST: GET with no `?q=` lists staff and no citizens; `?role=` and
- *     `?status=` narrow it; citizens need a `?q=` (id/email/phone
- *     substring); each row's actions sit in a collapsed `<details>`, and
- *     the caller's own row offers none.
- *   - ROLE: POST formAction=role promotes, moves or removes a staff role
- *     (this absorbed the old `/admin/roles` grant/revoke), behind the same
- *     lockout guards.
+ *   - LIST: GET with no `?q=` lists every staff account; `?role=`,
+ *     `?status=` and `?q=` (id/email substring) narrow it; each row's
+ *     actions sit in a collapsed `<details>`, and the caller's own row
+ *     offers none.
+ *   - ROLE: POST formAction=role moves an account between staff roles, or
+ *     with role=remove removes the account (this absorbed the old
+ *     `/admin/roles` grant/revoke), behind the same lockout guards.
  *   - NOTICES: every successful action redirects with `?notice=`, which
  *     the next GET renders as a confirmation banner.
  *   - BAN: POST formAction=ban sets status banned, kills the session, and
  *     audits it, redirecting back to the same `?q=`.
  *   - REACTIVATE: POST formAction=reactivate restores status active.
- *   - ERASE: POST formAction=erase severs identity (nulls contact/consent,
+ *   - ERASE: POST formAction=erase severs identity (nulls the email,
  *     status erased) — the load-bearing DPDP behaviour, re-verified here
  *     at the HTTP layer (tests/unit/erasure.test.ts owns the exhaustive
  *     lib-level version).
@@ -67,7 +67,7 @@ const WARD = {
 const EMAILS = {
   admin: 'admin-users-route-test-admin@example.com',
   curator: 'admin-users-route-test-curator@example.com',
-  citizen: 'admin-users-route-test-citizen@example.com',
+  plain: 'admin-users-route-test-plain@example.com',
   banTarget: 'admin-users-route-test-ban-target@example.com',
   reactivateTarget: 'admin-users-route-test-reactivate-target@example.com',
   eraseTarget: 'admin-users-route-test-erase-target@example.com',
@@ -81,7 +81,6 @@ const EMAILS = {
   revokeTarget: 'admin-users-route-test-revoke-target@example.com',
   roleCsrfTarget: 'admin-users-route-test-role-csrf-target@example.com',
 };
-const ERASE_TARGET_PHONE = '+919900012399';
 
 function normalize(html: string): string {
   return html
@@ -150,7 +149,7 @@ async function sessionFor(userId: number): Promise<{ cookieValue: string; token:
 type UserInsert = typeof schema.users.$inferInsert;
 
 async function upsertUser(email: string, fields: Partial<UserInsert> = {}): Promise<number> {
-  const values: UserInsert = { email, role: 'citizen', status: 'active', ...fields };
+  const values: UserInsert = { email, role: 'transcriber', status: 'active', ...fields };
   const [row] = await db
     .insert(schema.users)
     .values(values)
@@ -161,7 +160,7 @@ async function upsertUser(email: string, fields: Partial<UserInsert> = {}): Prom
 
 let adminId: number;
 let curatorId: number;
-let citizenId: number;
+let plainId: number;
 let banTargetId: number;
 let reactivateTargetId: number;
 let eraseTargetId: number;
@@ -172,7 +171,7 @@ let revokeTargetId: number;
 let roleCsrfTargetId: number;
 let adminAuth: { cookieValue: string; token: string };
 let curatorAuth: { cookieValue: string; token: string };
-let citizenAuth: { cookieValue: string; token: string };
+let plainAuth: { cookieValue: string; token: string };
 
 describe('/admin/users (Task 45)', () => {
   beforeAll(async () => {
@@ -182,10 +181,10 @@ describe('/admin/users (Task 45)', () => {
 
     adminId = await upsertUser(EMAILS.admin, { role: 'admin' });
     curatorId = await upsertUser(EMAILS.curator, { role: 'curator' });
-    citizenId = await upsertUser(EMAILS.citizen);
+    plainId = await upsertUser(EMAILS.plain);
     banTargetId = await upsertUser(EMAILS.banTarget);
     reactivateTargetId = await upsertUser(EMAILS.reactivateTarget, { status: 'banned' });
-    eraseTargetId = await upsertUser(EMAILS.eraseTarget, { phone: ERASE_TARGET_PHONE, homeWardId: WARD.id, consentAt: new Date(), consentVersion: 'v1' });
+    eraseTargetId = await upsertUser(EMAILS.eraseTarget);
     csrfTargetId = await upsertUser(EMAILS.csrfTarget);
     transcriberId = await upsertUser(EMAILS.transcriber, { role: 'transcriber' });
     roleTargetId = await upsertUser(EMAILS.roleTarget);
@@ -194,13 +193,12 @@ describe('/admin/users (Task 45)', () => {
 
     adminAuth = await sessionFor(adminId);
     curatorAuth = await sessionFor(curatorId);
-    citizenAuth = await sessionFor(citizenId);
+    plainAuth = await sessionFor(plainId);
   });
 
   afterAll(async () => {
     await db.delete(schema.users).where(inArray(schema.users.email, [EMAILS.addNew, EMAILS.addNoConfirm, EMAILS.addCsrf, EMAILS.addAdminNoConfirm]));
-    const userIds = [curatorId, citizenId, banTargetId, reactivateTargetId, eraseTargetId, csrfTargetId, transcriberId, roleTargetId, revokeTargetId, roleCsrfTargetId];
-    await db.delete(schema.otpCodes).where(inArray(schema.otpCodes.destination, [EMAILS.eraseTarget, ERASE_TARGET_PHONE]));
+    const userIds = [curatorId, plainId, banTargetId, reactivateTargetId, eraseTargetId, csrfTargetId, transcriberId, roleTargetId, revokeTargetId, roleCsrfTargetId];
     await db.delete(schema.sessions).where(inArray(schema.sessions.userId, [adminId, ...userIds]));
     await db.delete(schema.users).where(inArray(schema.users.id, [adminId, ...userIds]));
     await db.delete(schema.wards).where(eq(schema.wards.id, WARD.id));
@@ -213,8 +211,8 @@ describe('/admin/users (Task 45)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('GET /admin/users as a citizen -> 403', async () => {
-      const res = await run(UsersRoute, '/admin/users', { cookieValue: citizenAuth.cookieValue });
+    it('GET /admin/users as a transcriber -> 403', async () => {
+      const res = await run(UsersRoute, '/admin/users', { cookieValue: plainAuth.cookieValue });
       expect(res.status).toBe(403);
     });
 
@@ -256,13 +254,13 @@ describe('/admin/users (Task 45)', () => {
     });
 
     it('POST add for an email that already exists -> 400 with the specific message, role untouched', async () => {
-      const form = formWithToken({ formAction: 'add', email: EMAILS.citizen, role: 'admin', confirm: 'on' }, adminAuth.token);
+      const form = formWithToken({ formAction: 'add', email: EMAILS.plain, role: 'admin', confirm: 'on' }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(400);
       const html = normalize(await res.text());
       expect(html).toContain('An account with that email already exists.');
-      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId));
-      expect(row?.role).toBe('citizen');
+      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, plainId));
+      expect(row?.role).toBe('transcriber');
     });
 
     it('POST add with an invalid email -> 400, the typed value is kept in the field', async () => {
@@ -294,7 +292,7 @@ describe('/admin/users (Task 45)', () => {
       expect(checkbox).not.toContain('required');
     });
 
-    it.each(['citizen', 'superuser', ''])('POST add with role %j -> 400, nothing created', async (role) => {
+    it.each(['citizen', 'remove', 'superuser', ''])('POST add with role %j -> 400, nothing created', async (role) => {
       const form = formWithToken({ formAction: 'add', email: EMAILS.addNoConfirm, role, confirm: 'on' }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(400);
@@ -330,14 +328,14 @@ describe('/admin/users (Task 45)', () => {
   });
 
   describe('list', () => {
-    it('GET with no ?q= lists staff and no citizens', async () => {
+    it('GET with no ?q= lists every staff account, uncapped', async () => {
       const res = await run(UsersRoute, '/admin/users', { cookieValue: adminAuth.cookieValue });
       const html = normalize(await res.text());
       expect(html).toContain(EMAILS.admin);
       expect(html).toContain(EMAILS.curator);
       expect(html).toContain(EMAILS.transcriber);
-      expect(html).not.toContain(EMAILS.eraseTarget);
-      expect(html).not.toContain(EMAILS.citizen);
+      expect(html).toContain(EMAILS.plain);
+      expect(html).not.toContain('Showing the first');
     });
 
     it('GET ?role=curator lists only curators', async () => {
@@ -348,23 +346,19 @@ describe('/admin/users (Task 45)', () => {
       expect(html).toContain('<option value="curator" selected>');
     });
 
-    it('GET ?role=citizen with no ?q= asks for a search instead of dumping citizens', async () => {
+    it('GET ?role=<not a filter> falls back to the full staff list', async () => {
       const res = await run(UsersRoute, '/admin/users?role=citizen', { cookieValue: adminAuth.cookieValue });
+      expect(res.status).toBe(200);
       const html = normalize(await res.text());
-      expect(html).toContain('Enter an id, email, or phone number to look up citizens.');
-      expect(html).not.toContain(EMAILS.citizen);
+      expect(html).toContain(EMAILS.curator);
+      expect(html).toContain(EMAILS.transcriber);
+      expect(html).not.toContain('value="citizen"');
     });
 
-    it('GET ?q=<email> finds a citizen', async () => {
+    it('GET ?q=<email> finds that account', async () => {
       const res = await run(UsersRoute, `/admin/users?q=${encodeURIComponent(EMAILS.eraseTarget)}`, { cookieValue: adminAuth.cookieValue });
       const html = normalize(await res.text());
       expect(html).toContain(EMAILS.eraseTarget);
-      expect(html).toContain(`#${eraseTargetId}`);
-    });
-
-    it('GET ?q=<phone substring> finds the matching user', async () => {
-      const res = await run(UsersRoute, '/admin/users?q=12399', { cookieValue: adminAuth.cookieValue });
-      const html = normalize(await res.text());
       expect(html).toContain(`#${eraseTargetId}`);
     });
 
@@ -400,7 +394,7 @@ describe('/admin/users (Task 45)', () => {
   });
 
   describe('change role', () => {
-    it('POST formAction=role promotes a citizen to curator and redirects with a notice', async () => {
+    it('POST formAction=role moves a transcriber to curator and redirects with a notice', async () => {
       const form = formWithToken({ formAction: 'role', targetUserId: String(roleTargetId), role: 'curator', confirm: 'on', q: EMAILS.roleTarget }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(302);
@@ -411,35 +405,44 @@ describe('/admin/users (Task 45)', () => {
       expect(row?.role).toBe('curator');
     });
 
-    it('POST formAction=role with role=citizen removes staff access', async () => {
-      const form = formWithToken({ formAction: 'role', targetUserId: String(revokeTargetId), role: 'citizen', confirm: 'on' }, adminAuth.token);
+    it('POST formAction=role with role=remove removes the account and its sessions', async () => {
+      const target = await sessionFor(revokeTargetId);
+      const form = formWithToken({ formAction: 'role', targetUserId: String(revokeTargetId), role: 'remove', confirm: 'on' }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(302);
       expect(res.headers.get('location')).toBe(`/admin/users?notice=roleRemoved&nu=${revokeTargetId}`);
 
-      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, revokeTargetId));
-      expect(row?.role).toBe('citizen');
+      const rows = await db.select().from(schema.users).where(eq(schema.users.id, revokeTargetId));
+      expect(rows).toHaveLength(0);
+      const { readSession } = await import('../../src/lib/session');
+      expect(await readSession(target.cookieValue)).toBeNull();
+    });
+
+    it('GET ?notice=roleRemoved for a now-deleted account still confirms, by id', async () => {
+      const res = await run(UsersRoute, `/admin/users?notice=roleRemoved&nu=${revokeTargetId}`, { cookieValue: adminAuth.cookieValue });
+      const html = normalize(await res.text());
+      expect(html).toContain(`Removed staff access from #${revokeTargetId}.`);
     });
 
     it('POST formAction=role without confirm -> 400, role unchanged', async () => {
-      const form = formWithToken({ formAction: 'role', targetUserId: String(citizenId), role: 'curator' }, adminAuth.token);
+      const form = formWithToken({ formAction: 'role', targetUserId: String(plainId), role: 'curator' }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(400);
 
-      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId));
-      expect(row?.role).toBe('citizen');
+      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, plainId));
+      expect(row?.role).toBe('transcriber');
     });
 
-    it.each(['superuser', ''])('POST formAction=role with role %j -> 400, role unchanged', async (role) => {
-      const form = formWithToken({ formAction: 'role', targetUserId: String(citizenId), role, confirm: 'on' }, adminAuth.token);
+    it.each(['citizen', 'superuser', ''])('POST formAction=role with role %j -> 400, role unchanged', async (role) => {
+      const form = formWithToken({ formAction: 'role', targetUserId: String(plainId), role, confirm: 'on' }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(400);
 
-      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, citizenId));
-      expect(row?.role).toBe('citizen');
+      const [row] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, plainId));
+      expect(row?.role).toBe('transcriber');
     });
 
-    it.each(['citizen', 'curator'])("POST formAction=role=%s targeting the caller's OWN id -> 400 friendly error, admin still admin", async (role) => {
+    it.each(['remove', 'curator'])("POST formAction=role=%s targeting the caller's OWN id -> 400 friendly error, admin still admin", async (role) => {
       const form = formWithToken({ formAction: 'role', targetUserId: String(adminId), role, confirm: 'on' }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(400);
@@ -546,7 +549,7 @@ describe('/admin/users (Task 45)', () => {
   });
 
   describe('erase', () => {
-    it('POST formAction=erase severs identity: contact/consent nulled, status erased', async () => {
+    it('POST formAction=erase severs identity: email nulled, status erased', async () => {
       const form = formWithToken({ formAction: 'erase', targetUserId: String(eraseTargetId), confirm: 'on', q: '' }, adminAuth.token);
       const res = await run(UsersRoute, '/admin/users', { method: 'POST', cookieValue: adminAuth.cookieValue, form });
       expect(res.status).toBe(302);
@@ -555,9 +558,6 @@ describe('/admin/users (Task 45)', () => {
       const [row] = await db.select().from(schema.users).where(eq(schema.users.id, eraseTargetId));
       expect(row?.status).toBe('erased');
       expect(row?.email).toBeNull();
-      expect(row?.phone).toBeNull();
-      expect(row?.consentAt).toBeNull();
-      expect(row?.homeWardId).toBe(WARD.id);
 
     });
 

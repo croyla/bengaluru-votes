@@ -37,7 +37,7 @@ function loadSeedFixtures(): SeedE2EResult {
 
 export const seedFixtures = loadSeedFixtures();
 
-/** A fresh, distinctive email per test run/file — avoids OTP cooldown/dedupe collisions across repeated local runs. */
+/** A fresh, distinctive email per test run/file — avoids collisions across repeated local runs. */
 export function freshEmail(label: string): string {
   return `e2e-${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`;
 }

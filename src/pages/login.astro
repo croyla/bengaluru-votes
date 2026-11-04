@@ -14,8 +14,7 @@ if (Astro.request.method === 'POST') {
   Astro.response.headers.set('cache-control', 'no-store');
 
   const form = await Astro.request.formData();
-  const srcAttribution = Astro.cookies.get('bv_src')?.value ?? null;
-  const outcome = await handleLoginPost(form, srcAttribution);
+  const outcome = await handleLoginPost(form);
 
   if (outcome.kind === 'redirect') {
     return new Response(null, {

@@ -70,7 +70,6 @@ const messageText = message ? t(lang, message.key) : undefined;
                   <th>{t(lang, 'admin.partners.roster.colName')}</th>
                   <th>{t(lang, 'admin.partners.roster.colContact')}</th>
                   <th>{t(lang, 'admin.partners.roster.colWards')}</th>
-                  <th>{t(lang, 'admin.partners.roster.colRegistrations')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -81,7 +80,6 @@ const messageText = message ? t(lang, message.key) : undefined;
                     <td>{p.name}</td>
                     <td>{p.contact ?? '—'}</td>
                     <td>{p.wardIds.length}</td>
-                    <td>{p.registrations}</td>
                   </tr>
                 ))}
               </tbody>

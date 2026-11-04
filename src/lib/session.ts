@@ -1,8 +1,9 @@
 /**
  * Signed sliding sessions (architecture.md §7 "API surface & auth", §13
- * "Security") — the single session mechanism behind OTP auth (Task 25) and
- * the role/scope middleware (Task 26), for all three authenticated roles
- * (citizen, curator, admin). Anonymous read paths never touch this module.
+ * "Security") — the single session mechanism behind staff sign-in
+ * (src/lib/master-login.ts) and the role middleware (Task 26), for the
+ * three staff roles (transcriber, curator, admin). Anonymous read paths
+ * never touch this module.
  *
  * COOKIE FORMAT: the cookie value is `${id}.${hmac}` where `id` is 32 random
  * bytes (hex, from the `sessions` table PK) and `hmac` is
@@ -81,11 +82,8 @@ function resolveSessionSecret(): string {
 }
 
 /**
- * Exported so src/lib/otp.ts can reuse this exact secret as the OTP-code
- * hash pepper (`sha256(code + SESSION_SECRET)` — Task 25, documented there
- * and in the `otp_codes.code_hash` column comment). One secret, one
- * fail-closed resolution rule (`resolveSessionSecret` above), instead of a
- * second secret to provision and rotate.
+ * The resolved session-signing secret (fail-closed resolution rule:
+ * `resolveSessionSecret` above).
  */
 export const SESSION_SECRET = resolveSessionSecret();
 
@@ -130,7 +128,7 @@ function parseCookieValue(cookieValue: string): { id: string; hmac: string } | n
 /**
  * Creates a new session row for `userId` with a fresh 1-hour expiry.
  *
- * Return shape (documented precisely — Task 25's OTP verify endpoint and
+ * Return shape (documented precisely — src/lib/master-login.ts and
  * Task 26's middleware both depend on it):
  *   - `id`: the raw session id (the `sessions.id` DB primary key) — 32
  *     random bytes, hex. Exposed mainly for tests/introspection; callers
