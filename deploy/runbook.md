@@ -455,7 +455,7 @@ here in the same PR.
 | `GOOGLE_MAPS_MAP_ID` | yes (ward map — required by the `enabled` gate) | Cloud map style (`docs/gcp.md` §4) — required, not just recommended: it's the only place in code that enforces the neutrality rule (no party-affiliated look, no red markers). Unset means `mapsConfig().enabled` is false, so the map does not render at all; the ward page renders its server-rendered fallback markup instead of an unstyled stock basemap. |
 | `MAPS_ENABLED` | yes to show maps | Kill switch (`src/lib/maps-config.ts`) — must be exactly `true`, and both `GOOGLE_MAPS_BROWSER_KEY` and `GOOGLE_MAPS_MAP_ID` must also be non-empty, for the map to render. Sheds client-side map spend without a rebuild when a budget alert fires. |
 | `ANTHROPIC_API_KEY` | yes (Kannada MT/extraction) | Publish-triggered translation calls, and the `extract-worker` container's affidavit reading. Unset: translations stay `'pending'` and `jobs/translate-retry.ts` keeps retrying; the worker exits at once and queued affidavits wait on `/admin/affidavits`. |
-| `EXTRACTION_MODEL` | optional (default `claude-opus-5-5`) | The model the `extract-worker` reads affidavits with: `claude-haiku-5-5`, `claude-sonnet-5-5` or `claude-opus-5-5`. Anything else stops the worker at start. Opus measured 41 of 45 values correct on the nine fixtures at about $0.20 an affidavit (`docs/candidate-data.md` §3.5). |
+| `EXTRACTION_MODEL` | optional (default `claude-opus-5-5`) | The model the `extract-worker` reads affidavits with: `claude-haiku-5-5`, `claude-sonnet-5-5` or `claude-opus-5-5`. Anything else stops the worker at start. Opus measured 41 of 45 values correct on the nine fixtures at about $0.20 an affidavit. |
 | `EXTRACTION_CONCURRENCY` | optional (default `10`) | How many affidavits the worker reads at once, 1 to 50. Bounded by the Anthropic account's rate limits, not by the box. |
 | `RECAPTCHA_SITE_KEY` / `RECAPTCHA_SECRET_KEY` | yes (anonymous writes) | reCAPTCHA v3 on `POST /api/eoi` and `PUT /api/issue-votes`; tokens are bound to distinct actions. |
 | `ANONYMOUS_VOTE_DAILY_BUDGET` | recommended (default `50000`) | City-wide daily circuit breaker for anonymous issue ballots, in addition to the per-IP nginx limit. Exhaustion pauses new ballots until the next UTC day. |
@@ -756,7 +756,7 @@ $C stop extract-worker         # stops claiming, lets calls in flight finish
 - **It exits immediately without `ANTHROPIC_API_KEY`** and Compose retries it five times, then leaves it down. Queued affidavits wait; start it again once the key is set.
 - **Three attempts per affidavit**, then it shows under Failed on `/admin/affidavits` with the reason, where an admin can retry or discard it. A refusal fails on the first attempt.
 - **What needs a person** is on that page: "Needs matching" (the AI could not place the ward, or the name is already in that ward, or a transcriber sent it back) and "Failed".
-- **Cost:** every affidavit is one paid call, about $0.20 on Opus 5.5. 4,000 affidavits is about $800 at that rate before retries; `docs/candidate-data.md` §3.6 holds the budget.
+- **Cost:** every affidavit is one paid call, about $0.20 on Opus 5.5. 4,000 affidavits is about $800 at that rate before retries.
 - **Uploads go through nginx**, which allows 256 MB per request on staff routes; the app caps each PDF at 20 MB.
 
 ## Pointers (brief — see the named source for the full procedure)

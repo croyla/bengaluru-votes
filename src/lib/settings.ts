@@ -49,8 +49,7 @@ export const SETTING_KEYS = [
   'poll_close_time',
   // The transcriber queue hands out affidavits whose AI confidence is below
   // this (0-100) before the rest (src/lib/transcribe.ts). Absent -> 70, a
-  // placeholder until the Kannada pilot sets it (docs/candidate-data.md §4.2,
-  // §3.6).
+  // placeholder until the Kannada pilot sets it.
   'low_confidence_threshold',
 ] as const;
 

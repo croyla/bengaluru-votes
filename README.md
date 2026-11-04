@@ -84,7 +84,6 @@ tests/      unit, route, e2e and load tests
 | Read | For |
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | The technical design, dormant code (§15) and known gaps |
-| [`docs/candidate-data.md`](docs/candidate-data.md) | Candidate-data operations: loading, AI extraction, transcription, curation |
 | [`docs/design-system.md`](docs/design-system.md) | Visual language and components |
 | [`docs/gcp.md`](docs/gcp.md) | Google Cloud keys, quotas and consoles |
 | [`deploy/runbook.md`](deploy/runbook.md) | Provisioning, deploys, environment variables, operations |

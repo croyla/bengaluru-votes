@@ -219,7 +219,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (role !== 'admin') return respond(forbidden());
   }
   // Transcribers and admins only: curators correct flagged values and do not
-  // read the queue (docs/candidate-data.md §4–§5). The role admits the caller to
+  // read the queue. The role admits the caller to
   // the area; which AFFIDAVIT they may read or save is decided per request by
   // src/lib/transcribe.ts — an open assignment that is theirs — not here.
   if (isUnder(guardPath, '/transcribe')) {

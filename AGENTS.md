@@ -13,7 +13,6 @@ This serves a real election. Demo/fixture data is deliberately unmistakable as f
 ## The docs
 
 - `docs/architecture.md` — the technical design: what runs where, caching, data model, API and auth, SEO, bilingual text, jobs, security, deployment. §15 lists the **dormant code slated for removal** (registration, OTP, campaign sends, webhooks, partner/EOI, Sentry, …); nothing in it is a feature. §16 is external dependencies and known gaps. Section numbers are load-bearing: code comments cite `architecture §N`.
-- `docs/candidate-data.md` — candidate-data operations: bulk loading, AI extraction, transcription, curation, candidate status.
 - `docs/design-system.md` — visual language, neutrality rules, components and the UI completion checklist.
 - `docs/gcp.md` — Google Cloud provisioning (Geocoding, Maps JS, Places, reCAPTCHA, GA4): what to create in which console and which env var it becomes. `deploy/runbook.md`'s env var table is the authority on what each variable does at runtime.
 
@@ -183,7 +182,7 @@ Register/Login (fallback page `/login`) and Flag are **modals** that overlay wit
 
 Anonymous citizen (no account, most traffic, read-only) · Registered citizen · Transcriber · Data curator (**city-wide**, no ward or zone assignment) · Admin (city-wide). `roleEnum` in the schema is the authority on what exists today; `src/middleware.ts` is the authority on what each can do. There is no written permissions matrix at present.
 
-**Transcriber** has its own area, `/transcribe` (built 2026-10-13; `docs/candidate-data.md` §4, `src/lib/transcribe.ts`). The middleware admits a transcriber or an admin to it; a curator gets 403. Beyond that it is authorized by assignment rather than by role: every read and write checks "does an open, unexpired assignment with this id belong to this caller", and anything else is a 404, for an admin too. There is one Start control and no list: do not add search, filters or any way to choose an affidavit. A hold lasts 10 minutes. **Admins** also own `/admin/affidavits`: bulk upload, the needs-matching list and the failed list. Curators work the same needs-matching list at `/curator/matching`; uploading, retrying and discarding are admin-only.
+**Transcriber** has its own area, `/transcribe` (built 2026-10-13; `src/lib/transcribe.ts`). The middleware admits a transcriber or an admin to it; a curator gets 403. Beyond that it is authorized by assignment rather than by role: every read and write checks "does an open, unexpired assignment with this id belong to this caller", and anything else is a 404, for an admin too. There is one Start control and no list: do not add search, filters or any way to choose an affidavit. A hold lasts 10 minutes. **Admins** also own `/admin/affidavits`: bulk upload, the needs-matching list and the failed list. Curators work the same needs-matching list at `/curator/matching`; uploading, retrying and discarding are admin-only.
 
 ## Gotchas that bite silently
 
@@ -219,7 +218,7 @@ Keep the primary checkout for integration and release work. Before merging or ch
 
 Sessions may run tests and local servers independently, but use distinct ports, databases, and temporary files where applicable. Never point destructive test commands at another session's database or at the production database.
 
-Open questions: `docs/architecture.md` Open questions (backup target, monitoring, retention period), `docs/candidate-data.md` §7 (candidate-data operations). Check these before inventing an answer, and ask if it is not there.
+Open questions: `docs/architecture.md` Open questions (backup target, monitoring, retention period). Check these before inventing an answer, and ask if it is not there.
 
 ## Learning from corrections
 
