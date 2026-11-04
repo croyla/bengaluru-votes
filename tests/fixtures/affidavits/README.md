@@ -1,6 +1,6 @@
 # Sample candidate affidavits
 
-Nine real Form 26 affidavits from the **Karnataka Legislative Assembly election, 2023** (Bengaluru Urban constituencies). Fixtures for the transcriber screens and AI extraction. They are stand-ins: no GBA ward affidavits exist yet (see `docs/ksec-data-risk.md`).
+Nine real Form 26 affidavits from the **Karnataka Legislative Assembly election, 2023** (Bengaluru Urban constituencies). Fixtures for the transcriber screens and AI extraction. They are stand-ins: no GBA ward affidavits exist yet.
 
 Source: OpenCity dataset [Karnataka Assembly Elections 2023 - Affidavits](https://data.opencity.in/dataset/karnataka-assembly-elections-2023-affidavits), licence "Other (Public Domain)". Downloaded 2026-10-13, unmodified.
 

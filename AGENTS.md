@@ -15,7 +15,6 @@ This serves a real election. Demo/fixture data is deliberately unmistakable as f
 - `docs/architecture.md` — the technical design: what runs where, caching, data model, API and auth, SEO, bilingual text, jobs, security, deployment. §15 lists the **dormant code slated for removal** (registration, OTP, campaign sends, webhooks, partner/EOI, Sentry, …); nothing in it is a feature. §16 is external dependencies and known gaps. Section numbers are load-bearing: code comments cite `architecture §N`.
 - `docs/candidate-data.md` — candidate-data operations: bulk loading, AI extraction, transcription, curation, candidate status.
 - `docs/design-system.md` — visual language, neutrality rules, components and the UI completion checklist.
-- `docs/ksec-data-risk.md` — whether candidate affidavit data can be obtained at all. KSEC publishes no filled affidavits; this is the acquisition options and the risk. Read it before assuming candidate data exists.
 - `docs/gcp.md` — Google Cloud provisioning (Geocoding, Maps JS, Places, reCAPTCHA, GA4): what to create in which console and which env var it becomes. `deploy/runbook.md`'s env var table is the authority on what each variable does at runtime.
 
 Anything not stated in these docs or in the source is not written down. Do not invent a requirement to fill the gap — ask.
@@ -220,7 +219,7 @@ Keep the primary checkout for integration and release work. Before merging or ch
 
 Sessions may run tests and local servers independently, but use distinct ports, databases, and temporary files where applicable. Never point destructive test commands at another session's database or at the production database.
 
-Open questions: `docs/architecture.md` Open questions (backup target, monitoring, retention period), `docs/candidate-data.md` §7 (candidate-data operations), `docs/ksec-data-risk.md` §6 (whether the candidate data can be got at all). Check these before inventing an answer, and ask if it is not there.
+Open questions: `docs/architecture.md` Open questions (backup target, monitoring, retention period), `docs/candidate-data.md` §7 (candidate-data operations). Check these before inventing an answer, and ask if it is not there.
 
 ## Learning from corrections
 

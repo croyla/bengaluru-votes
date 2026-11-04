@@ -86,7 +86,6 @@ tests/      unit, route, e2e and load tests
 | [`docs/architecture.md`](docs/architecture.md) | The technical design, dormant code (§15) and known gaps |
 | [`docs/candidate-data.md`](docs/candidate-data.md) | Candidate-data operations: loading, AI extraction, transcription, curation |
 | [`docs/design-system.md`](docs/design-system.md) | Visual language and components |
-| [`docs/ksec-data-risk.md`](docs/ksec-data-risk.md) | Whether candidate affidavit data can be obtained |
 | [`docs/gcp.md`](docs/gcp.md) | Google Cloud keys, quotas and consoles |
 | [`deploy/runbook.md`](deploy/runbook.md) | Provisioning, deploys, environment variables, operations |
 | [`AGENTS.md`](AGENTS.md) | Commands, tests and conventions for working on the code |
