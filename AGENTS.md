@@ -29,7 +29,7 @@ npm test                    # vitest, whole suite — requires DATABASE_URL
 npm run typecheck           # astro check && tsc --noEmit
 npm run migrate             # drizzle migrations, forward-only, idempotent
 npm run translate -- --check  # bilingual staleness gate; no API calls, no key needed
-npm run translate           # regenerate stale Kannada via the configured translation backend; normally use Codex for translations
+npm run translate           # regenerate stale Kannada via the translation backend; routine translations are authored directly (below)
 ```
 
 Single test file / single test:
@@ -150,7 +150,7 @@ Client-side code is vanilla TypeScript in `src/islands/` — no UI framework. CS
 
 No layer translates at request time. Regeneration is unconditional — **hand-edits to generated Kannada are overwritten**; corrections belong in translation hints (frontmatter / `__hints`) or `src/i18n/glossary.json`. CI fails on a missing or stale `kn/` file or key (except the accepted `privacy.md` case).
 
-For editorial or UI translation work, use Codex to author the Kannada translation directly and preserve the generated `sourceHash` / `__hashes` metadata. Use `npm run translate -- --check` as the final staleness and hash gate. Do not depend on the local Claude CLI or an Anthropic API key for routine translation work; the configured translation backend is a fallback for regeneration when explicitly needed.
+For editorial or UI translation work, the coding agent authors the Kannada translation directly and preserve the generated `sourceHash` / `__hashes` metadata. Use `npm run translate -- --check` as the final staleness and hash gate. Do not depend on the translation backend (`scripts/translate.ts`: an Anthropic API key, or a local `claude` CLI) for routine translation work; it is a fallback for regeneration when explicitly needed.
 
 `t()` throws on a missing key unless *both* `import.meta.env.PROD` and `NODE_ENV=production` agree — so dev and tests surface missing translations loudly.
 
@@ -198,21 +198,21 @@ Anonymous citizen (no account; all citizen traffic) · Transcriber · Data curat
 - **Auth:** only staff (admin, curator, transcriber) sign in; citizens are anonymous and never register. No 2FA, no sign-in links. **Today `MASTER_PASSWORD` turns `/login` into a shared-password form** that signs in as any existing staff account; staff sign-in is being reworked to per-staff passwords in a separate change (`docs/architecture.md` §4, §7). Sessions are a 1-hour sliding idle timeout for every role (`src/lib/session.ts`). `npm run seed:admin` bootstraps the first admin. The email/WhatsApp OTP and registration code is dormant (§15), not a feature.
 - **Curator publish:** trusted; immediate, no approval gate.
 - **Bilingual:** EN at root, KN under `/kn/`, each with its own URL.
-- **Deployment:** one Hostinger VPS (Mumbai, 4 vCPU / 16 GB) runs production Compose, from `/root/src/bengaluru-votes-production`. The staging site/stack was retired on 2026-09-18 and removed from the repo on 2026-10-13; production is the only environment. **There is no registry**: images are built on the box. CI/CD returned 2026-11-04: PRs must pass the `test` check, and every push to `main` deploys to production automatically (`.github/workflows/deploy.yml`, secrets from the GitHub `production` environment). “Deploy” means production; there is no staging step. `deploy/runbook.md` ("Deploying") is the procedure; `architecture.md` §14.3/§14.4 is the design. Moved off the never-provisioned DigitalOcean Droplet on 2026-08-13.
+- **Deployment:** one Hostinger VPS (Mumbai, 4 vCPU / 16 GB) runs production Compose, from `/root/src/bengaluru-votes-production`. The staging site/stack was retired on 2026-09-18 and removed from the repo on 2026-10-13; production is the only environment. **There is no registry**: images are built on the box. CI/CD returned 2026-11-04: PRs must pass the `test` check, and every push to `main` deploys to production automatically (`.github/workflows/deploy.yml`, secrets from the GitHub `production` environment). “Deploy” means production; there is no staging step. `deploy/runbook.md` ("Deploying") is the procedure, and `.claude/skills/deploy-vps/SKILL.md` is a step-by-step version any agent can read; `architecture.md` §14.3/§14.4 is the design. Moved off the never-provisioned DigitalOcean Droplet on 2026-08-13.
 - **Consequence worth holding onto:** a merge to `main` deploys production with no approval step. The `test` check (typecheck, translation staleness, build, Vitest, Playwright smoke) is the only gate.
 - **`SENDS_DISABLED` is a local-only guard:** the local stack sets it so nothing there can message a real person. Never set it on production.
 
 ## Agent sessions and git workflow
 
-These rules apply to every coding agent (Codex, Claude Code). Use normal sessions for implementation; do not route work through a mandatory subagent or coordinator workflow. Multiple sessions may work in parallel, but they must never edit the same checkout or branch at the same time.
+These rules apply to every coding agent, whichever tool runs it. Use normal sessions for implementation; do not route work through a mandatory subagent or coordinator workflow. Multiple sessions may work in parallel, but they must never edit the same checkout or branch at the same time.
 
 Every new session must start its own instance of Docker Compose, configured to listen on a different host port from other active sessions. After starting it, present the resulting review URL to the user so they can inspect the changes directly.
 
-**Always use git worktrees**, whether or not other sessions are running: create one project-local `.worktrees/<short-task-name>` worktree and one descriptive branch (for example, `codex/<short-task-name>`) per task, and never edit files in the primary checkout. Verify `.worktrees/` is ignored before creating it. Each session owns its worktree, keeps its changes focused, and reports its branch, commit, tests, and limitations. Do not use `git reset --hard`, `git checkout --`, or broad cleanup commands in a shared checkout.
+**Always use git worktrees**, whether or not other sessions are running: create one project-local `.worktrees/<short-task-name>` worktree and one descriptive branch (for example, `agent/<short-task-name>`) per task, and never edit files in the primary checkout. Verify `.worktrees/` is ignored before creating it. Each session owns its worktree, keeps its changes focused, and reports its branch, commit, tests, and limitations. Do not use `git reset --hard`, `git checkout --`, or broad cleanup commands in a shared checkout.
 
 **Every change raises a PR.** Push the worktree's branch and open a pull request against `main`; never commit or push to `main` directly, however small the change. If GitHub is unavailable, keep committing on the local branch and open the PR once it is back.
 
-**No Claude session links in commits or PRs.** Commit messages, PR descriptions and PR comments must not include `claude.ai/code/session_…` links (or any other agent-session URL), even when a tool's default attribution adds one.
+**No agent session links in commits or PRs.** Commit messages, PR descriptions and PR comments must not link to an agent session (for example a `claude.ai/code/session_…` URL), even when a tool's default attribution adds one.
 
 Keep the primary checkout on `main` for review and release work. Changes reach `main` only by merging their PR, which deploys production (see Fixed decisions). If two sessions touch overlapping files, stop one or coordinate explicitly before either PR merges; never rely on concurrent edits resolving themselves.
 
@@ -221,6 +221,8 @@ Sessions may run tests and local servers independently, but use distinct ports, 
 ## Learning from corrections
 
 Treat the user's correcting instructions as authoritative project feedback, not as one-off conversation context. Before starting related work, review this file and apply the relevant lessons. When the user corrects a behavior, design choice, workflow, or verification gap, identify the generalizable rule and record it in this file during the same task so it is not requested again. Preserve specific user wording when it expresses a durable preference, avoid recording secrets or temporary details, and mention the rule that was captured. Never overwrite an existing user change while recording feedback.
+
+**Agent-neutral instructions:** `AGENTS.md` must work for any coding agent (Codex, Claude Code). Do not write tool-specific rules here; `CLAUDE.md` only imports this file.
 
 **Eyebrow and footer styling:** Eyebrow text should always be caps (uppercase for scripts with case; Kannada keeps normal letter spacing). Use one shared eyebrow treatment. The last full-width section of the ward page must meet the footer directly, with no blank gap. Ward section links should scroll smoothly beneath the sticky header, while respecting reduced-motion preferences.
 
@@ -234,7 +236,7 @@ Treat the user's correcting instructions as authoritative project feedback, not 
 
 ## UI verification
 
-After any UI change, use the `agent-browser` skill/CLI to inspect the live page at desktop and mobile widths. Before the first browser command, run `agent-browser skills get core` (or `agent-browser skills get core --full` when the full command reference is needed). Verify the actual rendered layout—not just the CSS or DOM—including column proportions, spacing, vertical alignment, control heights and widths, text wrapping, hover/focus states, and horizontal overflow. Compare reference-based changes against the reference site at the same viewport size before considering the work complete. Do not use the CUA browser surface for routine project UI verification when `agent-browser` is available.
+After any UI change, use the `agent-browser` CLI to inspect the live page at desktop and mobile widths. Before the first browser command, run `agent-browser skills get core` (or `agent-browser skills get core --full` when the full command reference is needed). Verify the actual rendered layout—not just the CSS or DOM—including column proportions, spacing, vertical alignment, control heights and widths, text wrapping, hover/focus states, and horizontal overflow. Compare reference-based changes against the reference site at the same viewport size before considering the work complete. Prefer `agent-browser` over a tool's built-in browser for routine project UI verification.
 
 **Transcriber screens are desktop only:** Transcribing needs the affidavit scan and the form side by side, so it "will be difficult to transcribe on mobile". Do not design, build or browser-test a mobile layout for `/transcribe`; verify those screens with `agent-browser` at a desktop viewport alone. Public pages still get both widths.
 
