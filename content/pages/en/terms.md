@@ -1,42 +1,44 @@
 ---
 title: Terms and conditions
-description: Terms for using Bengaluru Votes, submitting anonymous contributions and accessing election information.
+description: Rules for using Bengaluru Votes and submitting votes or reports.
 ---
 
-*Last updated: 2 November 2026*
+*Last updated: 7 November 2026*
 
-Bengaluru Votes is operated by **Oorvani Foundation**. By using this site, you agree to these terms. Our [Privacy policy](/privacy) explains how information is handled.
+**Oorvani Foundation** runs Bengaluru Votes. If you use this site, you agree to these terms. Read our [Privacy policy](/privacy) to learn how we use your data.
 
 ## Using the site
 
-The site provides ward and candidate information to help citizens understand Bengaluru's local elections. It is not an election authority. Citizens do not need an account to browse, vote on ward issues or report candidate-data errors. Login is reserved for authorised staff.
+This site helps you learn about wards, candidates and local polls in Bengaluru. We do not run the election. You do not need an account to browse, vote on issues or report errors. Only approved staff can sign in.
 
-Use the site lawfully. Do not knowingly submit false or misleading information, impersonate others, harass people, submit spam, interfere with the service, or bypass security controls and submission limits. Do not include private contact details or other unnecessary personal information in reports.
+Use the site within the law. Do not send claims you know are false or misleading. Do not pose as someone else, harass others or send spam. Do not disrupt the site or get around its security checks and limits on votes and reports. Keep private contact details out of reports. Do not add personal data that we do not need to check the error.
 
 ## Issue voting
 
-Choose exactly three issues in one ward. A browser receipt limits repeat voting and reveals results after submission. A submitted ballot cannot be changed. Results describe participation on this site, not a representative survey, a verified count of individual residents or an official election result. Issue voting does not register you to vote or cast an electoral vote.
+Choose exactly three issues in one ward. We save a receipt in your browser. It stops repeat votes and lets you see the results. Once you submit your vote, you cannot change it.
+
+The results show votes on this site. They do not speak for all residents, prove how many people took part or give an official poll result. An issue vote does not add your name to the voter roll. It is not a vote in the election.
 
 ## Reporting errors
 
-Reports are private submissions for curator review. Curators may dismiss a report or use it to correct published information; submission does not guarantee a change or a personal reply.
+Reports are private. Curators may reject a report or use it to fix the page. We do not promise a change or a reply to each report.
 
-You give Oorvani Foundation a non-exclusive permission to store and review your submission, use it to make and publish corrections, and include issue votes in aggregate results for this platform. This does not give us permission to publish your private report as a public comment. Submit only material you are entitled to share.
+You let Oorvani Foundation store and review what you submit. You also let us publish fixes based on it and add issue votes to the site's totals. These rights are non-exclusive: you can still share your work elsewhere. We do not have permission to post your private report as a public comment. Send only material you have the right to share.
 
 ## Accuracy and availability
 
-Candidate information is drawn from affidavits and other cited sources. Some information is extracted or translated using AI, and may contain errors. We work to correct errors but cannot guarantee that all information is complete, current or accurate, or that the site will always be available.
+Facts about candidates come from affidavits and other cited sources. AI reads or translates some of the text and can make mistakes. We work to fix errors. We cannot promise that all facts are complete, up to date or correct, or that the site will always work.
 
-For voter registration, polling locations, eligibility, election dates and official results, check the relevant election authority's records and announcements. External links and embedded services have their own terms and privacy policies.
+Check the election authority's records and notices for who can vote, how to enrol, where to vote, poll dates and official results. Other sites and services linked to or shown on this site have their own terms and privacy rules.
 
 To the extent permitted by applicable law, Oorvani Foundation is not liable for loss resulting from reliance on inaccurate or unavailable site information. Nothing in these terms excludes liability or rights that cannot lawfully be excluded.
 
 ## Protecting the service
 
-We may reject abusive submissions or restrict access to protect the site and its users. Staff must use only their authorised access and protect their credentials; access may be suspended or withdrawn for misuse.
+We may reject abusive reports or block access to keep the site and its users safe. Staff must keep their login details safe. They must stay within the access their role allows. We may suspend or end their access if they misuse it.
 
 ## Changes, language and contact
 
-We may update these terms by publishing a revised version with a new date. The English version controls if it differs from the Kannada translation.
+We may change these terms by posting a new version with a new date. If the Kannada and English texts differ, the English text applies.
 
-For questions about these terms, contact **[sivaramakrishnan.n@oorvani.in](mailto:sivaramakrishnan.n@oorvani.in)**.
+For questions about these terms, email **[sivaramakrishnan.n@oorvani.in](mailto:sivaramakrishnan.n@oorvani.in)**.
