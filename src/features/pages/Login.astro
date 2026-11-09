@@ -8,9 +8,13 @@
  * src/pages/kn/login.astro) — a redirect on success can only happen at the
  * page level (see src/pages/ward/[id].astro's header comment for why).
  *
- * The password is the shared `MASTER_PASSWORD` (src/lib/master-login.ts).
- * With it unset the form still renders, and every attempt fails with the
- * same generic error.
+ * The password is the account's own (src/lib/staff-login.ts), set by an admin.
+ * An account without one, like any wrong pair, fails with the same generic error.
+ *
+ * A failed sign-in re-renders with the error and puts focus in the first field
+ * (`autofocus`, which works without a script), with the error linked to both
+ * fields through `aria-describedby`, so a keyboard user does not restart at the
+ * top of the page (design-system §7.10).
  *
  * noindex: true belt-and-braces (src/middleware.ts already sends
  * X-Robots-Tag: noindex for every /login response).
@@ -28,6 +32,7 @@ interface Props {
 
 const { lang, state } = Astro.props;
 const errorText = state.error ? t(lang, state.error) : undefined;
+const noticeText = !errorText && state.notice ? t(lang, state.notice) : undefined;
 ---
 
 <Base
@@ -42,9 +47,19 @@ const errorText = state.error ? t(lang, state.error) : undefined;
 
     {
       errorText && (
-        <div class="login-banner">
+        <div class="login-banner" id="login-error">
           <Banner kind="error" lang={lang}>
             {errorText}
+          </Banner>
+        </div>
+      )
+    }
+
+    {
+      noticeText && (
+        <div class="login-banner">
+          <Banner kind="notice" lang={lang}>
+            {noticeText}
           </Banner>
         </div>
       )
@@ -64,6 +79,9 @@ const errorText = state.error ? t(lang, state.error) : undefined;
           autocomplete="username"
           value={state.destination ?? ''}
           required
+          autofocus={errorText ? true : undefined}
+          aria-invalid={errorText ? 'true' : undefined}
+          aria-describedby={errorText ? 'login-error' : undefined}
         />
       </div>
       <div class="form-field">
@@ -77,6 +95,8 @@ const errorText = state.error ? t(lang, state.error) : undefined;
           type="password"
           autocomplete="current-password"
           required
+          aria-invalid={errorText ? 'true' : undefined}
+          aria-describedby={errorText ? 'login-error' : undefined}
         />
       </div>
       <Button type="submit" variant="primary" lang={lang}>
@@ -87,8 +107,10 @@ const errorText = state.error ? t(lang, state.error) : undefined;
 </Base>
 
 <style>
+  /* The app container, like every other page, so the heading and form share
+     the header's left edge instead of floating at an arbitrary offset. */
   .login-page {
-    max-width: var(--container-prose);
+    max-width: var(--container-app);
     margin-inline: auto;
     padding-block: var(--space-8);
     padding-inline: var(--container-pad-x);
@@ -133,6 +155,11 @@ const errorText = state.error ? t(lang, state.error) : undefined;
     background: var(--color-bg);
     border: 1.5px solid var(--color-border);
     border-radius: var(--radius-sm);
+  }
+
+  /* A refused sign-in marks both fields: brick border, as the error banner above says. */
+  .form-input[aria-invalid='true'] {
+    border-color: var(--color-danger);
   }
 
   .form-input:focus-visible {

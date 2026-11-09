@@ -139,7 +139,28 @@
       "idx": 19,
       "version": "7",
       "when": 1794000000000,
-      "tag": "0019_ward_specific_issues",
+      "tag": "0019_remove_ward_candidate_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794100000000,
+      "tag": "0020_flag_other_target",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794200000000,
+      "tag": "0021_staff_passwords",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0022_ward_specific_issues",
       "breakpoints": true
     }
   ]

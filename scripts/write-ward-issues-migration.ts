@@ -2,7 +2,7 @@
  * Write a data migration that loads data/ward-issues.json into `ward_issues`.
  *
  *   npm run build:ward-issues -- <new_wards.geojson>            # refresh the JSON
- *   npm run migration:ward-issues -- drizzle/0019_xxx.sql       # write the migration SQL
+ *   npm run migration:ward-issues -- drizzle/NNNN_xxx.sql       # write the migration SQL
  *
  * `deploy.sh` runs `npm run migrate` on every deploy, so a migration written this
  * way reaches production with no manual seed. The SQL (a) upserts each ward's

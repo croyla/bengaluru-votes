@@ -31,7 +31,7 @@ describe('flag security boundary', () => {
     expect(flagNetworkHash(r,'2001:db8:0:0:0:0:0:1')).toBe(flagNetworkHash(r,'2001:db8::1'));
   });
   it('rejects an oversized streamed body without a Content-Length', async () => {
-    const body=new ReadableStream({start(c){c.enqueue(new Uint8Array(32768)); c.enqueue(new Uint8Array(1)); c.close();}});
+    const body=new ReadableStream({start(c){c.enqueue(new Uint8Array(131072)); c.enqueue(new Uint8Array(1)); c.close();}});
     const r=new Request('http://localhost',{method:'POST',headers:{'content-type':'application/json'},body,duplex:'half'} as RequestInit);
     await expect(readFlagBody(r)).rejects.toMatchObject({status:413});
   });
@@ -47,7 +47,7 @@ it('rejects forged forwarding identity through the actual Astro adapter in direc
   const { Socket } = await import('node:net');
   const raw = new IncomingMessage(new Socket());
   raw.method='GET'; raw.url='/api/flags'; raw.headers={host:'localhost','x-forwarded-for':'203.0.113.99'};
-  const request=NodeApp.createRequest(raw);
+  const request=NodeApp.createRequest(raw, { allowedDomains: [{ hostname: 'localhost' }] });  // production configures allowedDomains, so the adapter trusts the header there
   const symbol=Object.getOwnPropertySymbols(request).find(key=>String(key).includes('clientAddress'))!;
   const address=Reflect.get(request,symbol) as string;
   expect(address).toBe('203.0.113.99'); // The adapter really accepts this header.

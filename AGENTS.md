@@ -36,7 +36,7 @@ Single test file / single test:
 
 ```sh
 npx vitest run tests/routes/ward.test.ts
-npx vitest run tests/unit/master-login.test.ts -t 'name of the case'
+npx vitest run tests/unit/staff-password.test.ts -t 'name of the case'
 ```
 
 Seeds (order matters — `seed:dev` depends on wards existing):
@@ -76,7 +76,7 @@ docker compose -f deploy/compose.local.yml run --rm --no-deps --build \
   -e SITE_ORIGIN=https://bengaluruvotes.opencity.in \
   app sh -c '
     export DATABASE_URL="${DATABASE_URL%/gba}/bv_test"
-    unset MASTER_PASSWORD ALLOW_INSECURE_LOCAL_RECAPTCHA \
+    unset ALLOW_INSECURE_LOCAL_RECAPTCHA \
       RECAPTCHA_SITE_KEY RECAPTCHA_SECRET_KEY MAPS_ENABLED GOOGLE_MAPS_BROWSER_KEY \
       GOOGLE_MAPS_MAP_ID GOOGLE_GEOCODING_API_KEY
     case "$DATABASE_URL" in */bv_test) npm test ;; *) echo "not bv_test; refusing"; exit 2 ;; esac'
@@ -87,7 +87,6 @@ For a single test file or test case, replace `npm test` with the relevant `npx v
 The suite expects a clean environment, and the local image is not one. Every override above is there because a test fails without it:
 
 - `SITE_ORIGIN` set to production: the candidate JSON-LD tests.
-- `MASTER_PASSWORD` unset: the sign-in tests set their own value and expect it absent otherwise.
 - The vendor keys from `deploy/.env.local` unset (reCAPTCHA, Maps, geocoding): the app service loads that file, and a reCAPTCHA site key adds a script tag to the ward page that the ward route test counts. They are unset as a group so a key added to that file later cannot leak into a run. `ALLOW_INSECURE_LOCAL_RECAPTCHA` is a local-only switch and goes with them.
 
 If a run fails only in these areas, check the environment before the code. A variable added to `compose.local.yml` or `deploy/.env.local` belongs in the `unset` list too.
@@ -116,7 +115,7 @@ Every screen is **one component in `src/features/pages/` taking a `lang: 'en' | 
 
 Adding a page means touching three files (feature component + two shims). API routes and `/media` are not localized.
 
-**Status codes must live in the route shim, not the feature component.** Only page-level frontmatter can end a request with a custom status; a `Response` returned from a child component is ignored. That's why `src/pages/ward/[id].astro` does its own existence check before rendering `Ward.astro`.
+**Status codes must live in the route shim, not the feature component.** Only page-level frontmatter can end a request with a custom status; a `Response` returned from a child component is ignored. That's why `src/pages/ward/[id].astro` does its own existence check before rendering `Ward.astro`. Staff screens do the same for a missing id, but render the staff-shell not-found page (`src/features/pages/StaffError.astro`) with a 404 status instead of the public one; the staff 403 page is rendered by the middleware through `next()` (architecture §4).
 
 ### `src/middleware.ts` — the single enforcement point
 
@@ -157,7 +156,7 @@ For editorial or UI translation work, the coding agent authors the Kannada trans
 
 Curator edits **go live immediately** — no approval gate. Every field carries a visible source, distinguishing official/affidavit data from curator-compiled context. Curators edit through the same structured inputs as transcribers, beside the stored affidavit: there is no free-text field editor. `src/lib/curator-fix.ts` parses and saves a fix (a flag at `/curator/queue/{id}`, or the candidate editor at `/curator/candidate/{id}`), and every publish of a field value or ward move carries a required `confirmPublish` tick, re-checked on the server. The candidate editor uses one bottom confirmation and one atomic save for changed fields and the ward; unchanged fields keep their review status. `src/lib/publish.ts` keeps what is not an affidavit field: creating a candidate, its status, and `decideTranslationStatus` (manual-override vs source-change MT regeneration).
 
-**Flags are accepted only on the eight fields in `FLAGGABLE_FIELD_KEYS`** (`src/lib/candidate-profile.ts`: the seven affidavit fields and the ward). Ward-targeted flags (`ward_field`, `ward_issue`) were removed on 2026-11-05 (migration `0018`); ward pages carry no flag control, and curators have no ward screens.
+**Field-specific flags use the eight fields in `FLAGGABLE_FIELD_KEYS`** (`src/lib/candidate-profile.ts`: the seven affidavit fields and the ward). Citizens can also report “Something else” (`candidate_other`); the queue cannot fix these directly and links to the candidate editor (architecture §7). Ward-targeted flags (`ward_field`, `ward_issue`) were removed on 2026-11-05 (migration `0018`); ward pages carry no flag control, and curators have no ward screens.
 
 The curator routes are `/curator` (dashboard and search), `/curator/queue`, `/curator/candidate/{id}`, `/curator/matching` (the affidavits waiting for a candidate or ward) and `/curator/guide` (the onboarding page). They have no `/kn/` twin: the language is the signed-in user's saved one (`loadCuratorLang`).
 
@@ -193,11 +192,12 @@ Anonymous citizen (no account; all citizen traffic) · Transcriber · Data curat
 
 ## Fixed decisions (don't relitigate without asking)
 
-- **Auth:** only staff (admin, curator, transcriber) sign in; citizens are anonymous and never register. No 2FA, no sign-in links, no OTP, email or WhatsApp. **`/login` is a shared-password form**: an existing active staff account's email plus `MASTER_PASSWORD` (unset means nobody can sign in); staff sign-in is being reworked to per-staff passwords in a separate change (`docs/architecture.md` §4, §7). Sessions are a 1-hour sliding idle timeout for every role (`src/lib/session.ts`). `npm run seed:admin` bootstraps the first admin.
+- **Auth:** only staff (admin, curator, transcriber) sign in; citizens are anonymous and never register. No 2FA, no sign-in links, no OTP, email or WhatsApp. **`/login` takes an active staff account's email plus that account's own password** (scrypt hash in `users.password_hash`; at least 16 characters; no `MASTER_PASSWORD` exists any more). Only an admin sets or replaces a password (`/admin/users`, `setStaffPassword`); there is no self-service reset, and an account with none cannot sign in. Setting one ends that person's sessions. Sessions are a 1-hour sliding idle timeout for every role (`src/lib/session.ts`). `npm run seed:admin -- <email>` bootstraps the first admin and prints a generated password once; `npm run set-password -- <email>` sets or resets one from the server (`STAFF_PASSWORD` env to choose it). Never write a real staff password in the repo; seeds print generated ones.
 - **Curator publish:** trusted; immediate, no approval gate.
 - **Bilingual:** EN at root, KN under `/kn/`, each with its own URL.
 - **Deployment:** one Hostinger VPS (Mumbai, 4 vCPU / 16 GB) runs production Compose, from `/root/src/bengaluru-votes-production`. The staging site/stack was retired on 2026-09-18 and removed from the repo on 2026-10-13; production is the only environment. **There is no registry**: images are built on the box. CI/CD returned 2026-11-04: PRs must pass the `test` check, and every push to `main` deploys to production automatically (`.github/workflows/deploy.yml`, secrets from the GitHub `production` environment). “Deploy” means production; there is no staging step. `deploy/runbook.md` ("Deploying") is the procedure, and `.claude/skills/deploy-vps/SKILL.md` is a step-by-step version any agent can read; `architecture.md` §14.3/§14.4 is the design. Moved off the never-provisioned DigitalOcean Droplet on 2026-08-13.
-- **Consequence worth holding onto:** a merge to `main` deploys production with no approval step. The `test` check (typecheck, translation staleness, build, Vitest, Playwright smoke) is the only gate.
+- **SSH to the box:** `ssh bengaluruvotes-vps` (a host alias in each operator's `~/.ssh/config`, key-only, root; use it for any command on the VPS, never the bare hostname, whose host key a laptop will not have trusted). Production commands run from `/root/src/bengaluru-votes-production` (`deploy/runbook.md`).
+- **Consequence worth holding onto:** a merge to `main` deploys production with no approval step. The `test` check (documented in architecture §12) is the only gate. A change that touches only docs (including `AGENTS.md`, `docs/`, `.claude/`, `deploy/runbook.md`) skips the gate and does not deploy; tests- or CI-only changes run the gate but do not deploy (`scripts/ci/changed-paths.mjs`; the runtime path list is in architecture §14.4).
 
 ## Agent sessions and git workflow
 
@@ -225,11 +225,13 @@ Treat the user's correcting instructions as authoritative project feedback, not 
 
 **Eyebrow and footer styling:** Eyebrow text should always be caps (uppercase for scripts with case; Kannada keeps normal letter spacing). Use one shared eyebrow treatment. The last full-width section of the ward page must meet the footer directly, with no blank gap. Ward section links should scroll smoothly beneath the sticky header, while respecting reduced-motion preferences.
 
+**User-facing documentation:** Keep public information pages, staff guides and help text simple. Use short sentences, familiar words and direct instructions. Remove AI-sounding phrases, promotional filler and unsupported promises. Preserve essential rules and keep English and Kannada in step. Keep the English homepage prose, live editorial pages and staff guides at a Flesch Reading Ease score above 65. The CI test and scoring method are documented in `tests/readability/README.md`. Preserve meaning and required disclosures; never add filler or remove needed instructions to raise a score. When editing guide wording, include `tests/routes/staff-guides.test.ts` in verification and update its wording assertions without weakening the rules they check.
+
 **Reusable design-system documentation:** The design system should describe generic foundations, section patterns, and components, including form fields, buttons, cards, and their states. It should not mention specific pages except as example usage; do not organize its rules as individual page specifications.
 
 **Button coverage:** Keep every button treatment documented and reusable, including light buttons and icon-only controls. Use shared styles for server-rendered and client-created buttons; page CSS should control placement rather than recreate a variant. Icon-only controls require a localized accessible name and documented sizing and interaction states.
 
-**Hierarchical navigation:** Use shared breadcrumbs above the title on ward and comparison pages instead of a standalone Back to ward button. The ward breadcrumb includes both its citizen-facing number and localized name (for example, “Ward 23 Jogpalya”), never the composite route id. Ancestors are links; the current page is noninteractive. Keep the pattern documented in the design system.
+**Hierarchical navigation:** Use shared breadcrumbs above the title on ward and comparison pages; they stay the primary hierarchical navigation. Candidate pages additionally carry a visible "Back to ward" text link (a link, never a button; owner decision 2026-11-06, replacing the earlier breadcrumbs-only rule), in the content area just under the identity band. The ward breadcrumb includes both its citizen-facing number and localized name (for example, “Ward 23 Jogpalya”), never the composite route id. Ancestors are links; the current page is noninteractive. Keep the pattern documented in the design system.
 
 **Docs stay consistent with every change:** Fix every affected doc in the same change, without being asked: `docs/`, `AGENTS.md`, `deploy/runbook.md`, editorial pages in `content/pages/` (with their Kannada twin and hash metadata), and user-visible UI strings that describe the changed behaviour. Search for the removed or renamed thing across all of them before declaring the work done. Run the `docs-consistency` agent after removing or changing a feature.
 
@@ -243,7 +245,9 @@ After any UI change, have the live rendered UI verified in a real browser with t
 
 **Transcriber screens are desktop only:** Transcribing needs the affidavit scan and the form side by side, so it "will be difficult to transcribe on mobile". Do not design, build or browser-test a mobile layout for `/transcribe`; verify those screens with `agent-browser` at a desktop viewport alone. Public pages still get both widths.
 
-**Candidate-data operation:** Siva bulk-loads affidavits as soon as the first ones are available online — do not wait for a final notification, final candidate list or complete set — and AI extraction and transcription proceed on ready records while loading continues. Order of work: bulk loading, AI extraction (one confidence percentage per affidavit), transcriber review, then curators resolving user flags and matching affidavits waiting for a candidate or ward. The transcriber queue serves missing data first, low AI confidence next, then the rest. A flag enters the curator queue and the curator either dismisses it or fixes the data. Curators do not oversee routine transcription or unflagged cases, and do not upload, retry or discard affidavits (admin-only). Reconcile rejected/withdrawn candidates against later official lists. When presenting the operation, keep AI and transcription budgets separate from the flag-curation rota through election day, and distinguish planning assumptions from measured results.
+**Candidate-data operation:** Siva bulk-loads affidavits as soon as the first ones are available online — do not wait for a final notification, final candidate list or complete set — and AI extraction and transcription proceed on ready records while loading continues. Order of work: bulk loading, AI extraction (one confidence percentage per affidavit), transcriber review, then curators resolving user flags and matching affidavits waiting for a candidate or ward. The transcriber queue serves missing data first, low AI confidence next, then the rest. A flag enters the curator queue and the curator either rejects it or fixes the data. Curators do not oversee routine transcription or unflagged cases, and do not upload, retry or discard affidavits (admin-only). Reconcile rejected/withdrawn candidates against later official lists. When presenting the operation, keep AI and transcription budgets separate from the flag-curation rota through election day, and distinguish planning assumptions from measured results.
+
+**Staff entry rules and escalation (2026-11-06):** the staff guides (`src/components/FieldEntryRules.astro`, `src/features/pages/{curator,transcribe}/Guide.astro`) state these once; keep them in step with any change. Names and parties are entered exactly as printed on the affidavit, in English letters, titles and initials as printed, the party's full name as printed, `Independent` for independents. Assets are whole rupees, and nil assets are `Not declared`. A pending criminal case is one the affidavit's own criminal-cases section lists as pending; nobody interprets beyond it. A field saved as *Cannot read* is fixed later by any curator in the candidate editor, checking the affidavit (there is no list of such fields yet, so a curator finds the candidate by name). Curators do not use the AI confidence figure; it only orders the transcriber queue. A corrected sent-back match goes live at once and is not re-queued to transcribers. Wards are the current post-delimitation wards (corporation, number, name); an affidavit naming an old ward that cannot be mapped is left for matching, never guessed. There is no in-app channel to the admin: curators message the admin directly, quoting candidate name and ward, and no contact detail is printed in the guides. Citizen-supplied source links are opened only if the site is recognised, with no credentials entered and no files downloaded. The transcriber's report button stays labelled "Send to an admin". The flag verb is *Reject* everywhere, never "dismiss".
 
 **Candidate identity and photos:** Use the report-card full-name and party fields, including their Kannada translations, everywhere a candidate identity is displayed or searched. Do not add separate Kannada name/party inputs. The candidate editor has no election-status or affidavit-upload sections, for either curators or admins. Reject direct status/upload submissions there. Use one bottom confirmation and Save and publish action for changed report-card fields and ward changes together; never mark unchanged fields as checked. Do not offer candidate photo uploads: photos are not expected. Preserve existing translations when migrating legacy data.
 

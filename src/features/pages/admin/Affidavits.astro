@@ -18,6 +18,8 @@ import AdminLayout from '../../../layouts/AdminLayout.astro';
 import Card from '../../../components/Card.astro';
 import Banner from '../../../components/Banner.astro';
 import Button from '../../../components/Button.astro';
+import EmptyState from '../../../components/EmptyState.astro';
+import { GENDERS } from '../../../lib/affidavit-extraction';
 import { t, type Lang } from '../../../i18n';
 import { CSRF_FIELD_NAME } from '../../../lib/csrf';
 import type { AffidavitAdminData, AffidavitState } from '../../../lib/affidavit-queue';
@@ -39,11 +41,12 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
   // `name_en` already starts with the ward number ("11 - Old Baiyappanahalli").
   return `${corporation} ${ward.id % 1000} · ${ward.nameEn.replace(/^\d+\s*-\s*/, '')}`;
 }
+const wardById = new Map(wards.map((ward) => [ward.id, wardLabel(ward)]));
 ---
 
 <AdminLayout lang={lang} title={t(lang, 'admin.affidavits.meta.title')} description={t(lang, 'admin.affidavits.meta.description')}>
   <div class="admin-page">
-    <p><a href="/admin">{t(lang, 'admin.affidavits.backToConsole')}</a></p>
+    <p><a class="body-link" href="/admin">{t(lang, 'admin.affidavits.backToConsole')}</a></p>
     <h1>{t(lang, 'admin.affidavits.heading')}</h1>
 
     {
@@ -88,26 +91,26 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
       <p class="note">{t(lang, 'admin.affidavits.match.intro')}</p>
       {
         data.needsMatching.length === 0 ? (
-          <p class="placeholder-note">{t(lang, 'admin.affidavits.match.none')}</p>
+          <EmptyState fact={t(lang, 'admin.affidavits.match.none')} />
         ) : (
           <ul class="work-list">
             {data.needsMatching.map((row) => (
               <li class="work-item">
                 <div class="work-facts">
                   <p class="work-title">
-                    <a href={row.pdfUrl} target="_blank" rel="noopener noreferrer">
-                      {t(lang, 'admin.affidavits.viewPdf', { id: row.id })}
+                    <a class="body-link" href={row.pdfUrl} target="_blank" rel="noopener noreferrer">
+                      {row.nameRead ? t(lang, 'admin.affidavits.viewPdfRead', { name: row.nameRead }) : t(lang, 'admin.affidavits.viewPdfOpen')}
                     </a>
                     <span class={`tag tag--${row.reason}`}>{t(lang, `admin.affidavits.reason.${row.reason}`)}</span>
                   </p>
-                  <dl class="read">
+                  <dl class="read kv-list">
                     <div>
                       <dt>{t(lang, 'admin.affidavits.match.wardRead')}</dt>
                       <dd>{row.wardRead ?? t(lang, 'admin.affidavits.match.wardNotRead')}</dd>
                     </div>
                     <div>
                       <dt>{t(lang, 'admin.affidavits.match.gender')}</dt>
-                      <dd>{row.gender ?? '—'}</dd>
+                      <dd>{row.gender === null ? '—' : (GENDERS as readonly string[]).includes(row.gender) ? t(lang, `transcribe.reading.gender.${row.gender}`) : row.gender}</dd>
                     </div>
                     <div>
                       <dt>{t(lang, 'admin.affidavits.match.confidence')}</dt>
@@ -149,7 +152,7 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
                       <select id={`attach-${row.id}`} class="form-input" name="attachToCandidateId">
                         <option value="">{t(lang, 'admin.affidavits.match.attachNew')}</option>
                         {row.sameName.map((c) => (
-                          <option value={c.id}>{t(lang, 'admin.affidavits.match.attachExisting', { name: c.nameEn, id: c.id })}</option>
+                          <option value={c.id}>{t(lang, 'admin.affidavits.match.attachExisting', { name: c.nameEn, ward: wardById.get(c.wardId) ?? String(c.wardId % 1000) })}</option>
                         ))}
                       </select>
                     </div>
@@ -169,14 +172,14 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
       <h2>{t(lang, 'admin.affidavits.failed.heading')}</h2>
       {
         data.failed.length === 0 ? (
-          <p class="placeholder-note">{t(lang, 'admin.affidavits.failed.none')}</p>
+          <EmptyState fact={t(lang, 'admin.affidavits.failed.none')} />
         ) : (
           <ul class="work-list">
             {data.failed.map((row) => (
               <li class="work-item work-item--failed">
                 <div class="work-facts">
                   <p class="work-title">
-                    <a href={row.pdfUrl} target="_blank" rel="noopener noreferrer">
+                    <a class="body-link" href={row.pdfUrl} target="_blank" rel="noopener noreferrer">
                       {t(lang, 'admin.affidavits.viewPdf', { id: row.id })}
                     </a>
                   </p>
@@ -197,9 +200,9 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
                       <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
                       <input type="hidden" name="formAction" value="discard" />
                       <input type="hidden" name="affidavitId" value={row.id} />
-                      <label class="checkbox">
+                      <label class="confirm-tick">
                         <input type="checkbox" name="confirm" required />
-                        {t(lang, 'admin.affidavits.failed.discardConfirm')}
+                        <span>{t(lang, 'admin.affidavits.failed.discardConfirm')}</span>
                       </label>
                       <Button type="submit" variant="destructive" lang={lang}>
                         {t(lang, 'admin.affidavits.failed.discard')}
@@ -244,16 +247,11 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
     font-size: var(--text-sm);
   }
 
-  .placeholder-note {
-    margin: var(--space-3) 0 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    font-style: italic;
-  }
-
+  /* Five state tiles: as many per row as fit (two-up on a phone, §7.16), each
+     at least 8rem so a translated label wraps inside its tile. */
   .counts {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
     gap: var(--space-3);
     margin: 0;
   }
@@ -265,8 +263,10 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
   }
 
   .count dt {
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    line-height: var(--leading-xs);
     color: var(--color-text-muted);
+    overflow-wrap: anywhere;
   }
 
   .count dd {
@@ -354,24 +354,8 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
   }
 
   .read {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1) var(--space-6);
-    margin: var(--space-2) 0 0;
+    margin: var(--space-3) 0 0;
     font-size: var(--text-sm);
-  }
-
-  .read div {
-    display: flex;
-    gap: var(--space-2);
-  }
-
-  .read dt {
-    color: var(--color-text-muted);
-  }
-
-  .read dd {
-    margin: 0;
   }
 
   .tag {
@@ -390,6 +374,22 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
     align-items: end;
   }
 
+  /* Below 768px the three fields and the button stack instead of squeezing to a
+     few characters each (§6.2.1: multi-column sections stack on narrow screens). */
+  @media (max-width: 767px) {
+    .match-form {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .work-item--failed {
+      flex-direction: column;
+    }
+
+    .failed-actions {
+      justify-content: flex-start;
+    }
+  }
+
   .failed-actions {
     display: flex;
     flex-wrap: wrap;
@@ -402,17 +402,5 @@ function wardLabel(ward: { id: number; nameEn: string; corporation: string }): s
     display: flex;
     align-items: center;
     gap: var(--space-3);
-  }
-
-  .checkbox {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    font-size: var(--text-sm);
-  }
-
-  .checkbox input {
-    margin-top: 0.2em;
-    flex: none;
   }
 </style>

@@ -37,7 +37,9 @@
 import AdminLayout from '../../../layouts/AdminLayout.astro';
 import Card from '../../../components/Card.astro';
 import Banner from '../../../components/Banner.astro';
+import Badge from '../../../components/Badge.astro';
 import Button from '../../../components/Button.astro';
+import EmptyState from '../../../components/EmptyState.astro';
 import FormField from '../../../components/FormField.astro';
 import { t, type Lang } from '../../../i18n';
 import { CSRF_FIELD_NAME } from '../../../lib/csrf';
@@ -115,8 +117,9 @@ function contactDisplay(row: UserSearchRow): string {
   return row.email ?? '—';
 }
 
+/** Names an account in a confirmation by its email; an erased account has none, so by its status. */
 function userIdentifier(row: UserSearchRow): string {
-  return row.email ?? `#${row.id}`;
+  return row.email ?? t(lang, 'admin.users.results.noContact');
 }
 
 /** The roles a row can be moved to: every staff role but its current one, then 'remove' (delete the account). */
@@ -129,7 +132,7 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
 
 <AdminLayout lang={lang} title={t(lang, 'admin.users.meta.title')} description={t(lang, 'admin.users.meta.description')}>
   <div class="admin-page">
-    <p><a href="/admin">{t(lang, 'admin.users.backToConsole')}</a></p>
+    <p><a class="body-link" href="/admin">{t(lang, 'admin.users.backToConsole')}</a></p>
     <h1>{t(lang, 'admin.users.heading')}</h1>
 
     {
@@ -159,13 +162,19 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
               ))}
             </select>
           </div>
+          <div class="form-field">
+            <label class="form-label" for="add-secret">
+              {t(lang, 'admin.users.add.passwordLabel')}
+            </label>
+            <input id="add-secret" class="form-input" name="initialSecret" type="password" autocomplete="new-password" minlength="16" maxlength="256" />
+          </div>
           <Button type="submit" variant="primary" lang={lang}>
             {t(lang, 'admin.users.add.submit')}
           </Button>
         </div>
-        <label class="checkbox">
+        <label class="confirm-tick">
           <input type="checkbox" name="confirm" />
-          {t(lang, 'admin.users.add.confirmLabel')}
+          <span>{t(lang, 'admin.users.add.confirmLabel')}</span>
         </label>
       </form>
     </Card>
@@ -208,7 +217,7 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
 
       {
         rows.length === 0 ? (
-          <p class="placeholder-note">{t(lang, 'admin.users.search.noResults')}</p>
+          <EmptyState fact={t(lang, 'admin.users.search.noResults')} />
         ) : (
           <>
             <div class="user-grid user-head" aria-hidden="true">
@@ -224,13 +233,14 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                   <details>
                     <summary class="user-grid user-summary">
                       <span class="user-contact">
-                        {contactDisplay(row)} <span class="user-id">#{row.id}</span>
+                        {contactDisplay(row)}
                       </span>
                       <span>
                         <span class={`tag tag--${row.role}`}>{roleLabel(row.role)}</span>
                       </span>
                       <span>
                         <span class={`tag tag--${row.status}`}>{t(lang, `admin.users.status.${row.status}`)}</span>
+                        {row.status === 'active' && !row.hasSecret && <Badge variant="flag-pending" lang={lang}>{t(lang, 'admin.users.results.noPassword')}</Badge>}
                       </span>
                       <span class="user-added">
                         <span class="user-added-label">{t(lang, 'admin.users.list.colAdded')} </span>
@@ -240,9 +250,36 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                     </summary>
 
                     <div class="user-panel">
-                      {row.id === selfId ? (
-                        <p class="self-note">{t(lang, 'admin.users.list.selfNote')}</p>
-                      ) : (
+                      {row.id === selfId && <p class="self-note">{t(lang, 'admin.users.list.selfNote')}</p>}
+                      {row.status === 'active' && (
+                        <div class="action-grid">
+                          <section class="action">
+                            <h3>{t(lang, 'admin.users.password.heading')}</h3>
+                            <form method="post" action="/admin/users" class="action-form">
+                              <input type="hidden" name={CSRF_FIELD_NAME} value={csrfToken} />
+                              <input type="hidden" name="formAction" value="setSecret" />
+                              <input type="hidden" name="targetUserId" value={row.id} />
+                              <input type="hidden" name="q" value={query} />
+                              {hasExplicitRoleFilter && <input type="hidden" name="filterRole" value={roleFilter} />}
+                              <input type="hidden" name="filterStatus" value={statusFilter} />
+                              <div class="form-field">
+                                <label class="form-label" for={`secret-${row.id}`}>
+                                  {t(lang, 'admin.users.password.label')}
+                                </label>
+                                <input id={`secret-${row.id}`} class="form-input" name="newSecret" type="password" autocomplete="new-password" minlength="16" maxlength="256" required />
+                              </div>
+                              <label class="confirm-tick">
+                                <input type="checkbox" name="confirm" required />
+                                <span>{t(lang, 'admin.users.password.confirmLabel', { user: userIdentifier(row) })}</span>
+                              </label>
+                              <Button type="submit" variant="secondary" lang={lang}>
+                                {t(lang, 'admin.users.password.submit')}
+                              </Button>
+                            </form>
+                          </section>
+                        </div>
+                      )}
+                      {row.id !== selfId && (
                         row.status !== 'erased' && (
                           <div class="action-grid">
                             <section class="action">
@@ -264,9 +301,9 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                                     ))}
                                   </select>
                                 </div>
-                                <label class="checkbox">
+                                <label class="confirm-tick">
                                   <input type="checkbox" name="confirm" required />
-                                  {t(lang, 'admin.users.role.confirmLabel', { user: userIdentifier(row) })}
+                                  <span>{t(lang, 'admin.users.role.confirmLabel', { user: userIdentifier(row) })}</span>
                                 </label>
                                 <Button type="submit" variant="secondary" lang={lang}>
                                   {t(lang, 'admin.users.role.submit')}
@@ -290,9 +327,9 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                                     </label>
                                     <input id={`ban-reason-${row.id}`} class="form-input" name="reason" type="text" />
                                   </div>
-                                  <label class="checkbox">
+                                  <label class="confirm-tick">
                                     <input type="checkbox" name="confirm" required />
-                                    {t(lang, 'admin.users.ban.confirmLabel', { user: userIdentifier(row) })}
+                                    <span>{t(lang, 'admin.users.ban.confirmLabel', { user: userIdentifier(row) })}</span>
                                   </label>
                                   <Button type="submit" variant="secondary" lang={lang}>
                                     {t(lang, 'admin.users.ban.submit')}
@@ -311,9 +348,9 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                                   <input type="hidden" name="q" value={query} />
                                   {hasExplicitRoleFilter && <input type="hidden" name="filterRole" value={roleFilter} />}
                                   <input type="hidden" name="filterStatus" value={statusFilter} />
-                                  <label class="checkbox">
+                                  <label class="confirm-tick">
                                     <input type="checkbox" name="confirm" required />
-                                    {t(lang, 'admin.users.reactivate.confirmLabel', { user: userIdentifier(row) })}
+                                    <span>{t(lang, 'admin.users.reactivate.confirmLabel', { user: userIdentifier(row) })}</span>
                                   </label>
                                   <Button type="submit" variant="secondary" lang={lang}>
                                     {t(lang, 'admin.users.reactivate.submit')}
@@ -332,9 +369,9 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
                                 <input type="hidden" name="q" value={query} />
                                 {hasExplicitRoleFilter && <input type="hidden" name="filterRole" value={roleFilter} />}
                                 <input type="hidden" name="filterStatus" value={statusFilter} />
-                                <label class="checkbox">
+                                <label class="confirm-tick">
                                   <input type="checkbox" name="confirm" required />
-                                  {t(lang, 'admin.users.erase.confirmLabel', { user: userIdentifier(row) })}
+                                  <span>{t(lang, 'admin.users.erase.confirmLabel', { user: userIdentifier(row) })}</span>
                                 </label>
                                 <Button type="submit" variant="destructive" lang={lang}>
                                   {t(lang, 'admin.users.erase.submit')}
@@ -376,13 +413,6 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
   .admin-page h2 {
     font-size: var(--text-lg);
     margin: 0 0 var(--space-3);
-  }
-
-  .placeholder-note {
-    margin: var(--space-3) 0 0;
-    color: var(--color-text-muted);
-    font-size: var(--text-sm);
-    font-style: italic;
   }
 
   .add-form,
@@ -434,18 +464,6 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
     background: var(--color-bg);
     border: 1.5px solid var(--color-border);
     border-radius: var(--radius-sm);
-  }
-
-  .checkbox {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    font-size: var(--text-sm);
-  }
-
-  .checkbox input {
-    margin-top: 0.2em;
-    flex: none;
   }
 
   .filter-reset {
@@ -514,7 +532,6 @@ function roleChoices(row: UserSearchRow): { value: string; label: string }[] {
     overflow-wrap: anywhere;
   }
 
-  .user-id,
   .user-added {
     font-weight: 400;
     color: var(--color-text-muted);

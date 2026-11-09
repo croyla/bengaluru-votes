@@ -11,6 +11,7 @@ import { submitPublicFlag } from '../../src/lib/flags';
 import { anonReporter } from '../support/reporter';
 import { t } from '../../src/i18n';
 import QueueItemRoute from '../../src/pages/curator/queue/[id].astro';
+import QueueIndexRoute from '../../src/pages/curator/queue/index.astro';
 
 // This suite owns ward ids 99411 and 99412.
 const WARD_A = ward(99411, 'Flag Fix Test Ward A');
@@ -50,8 +51,8 @@ describe('a flag on an affidavit field', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const html = await res.text();
-    // Astro escapes the ampersand in an attribute as `&#38;`.
-    expect(html).toContain(`src="${c.pdfUrl}#navpanes=0&#38;view=FitH"`);
+    // Astro escapes the ampersand in an attribute as `&amp;`.
+    expect(html).toContain(`src="${c.pdfUrl}#navpanes=0&amp;view=FitH"`);
     expect(html).toContain('name="movableInr" value="10210000"');
     expect(html).toContain('name="immovableInr" value="35000000"');
     expect(html).not.toContain('name="age"');
@@ -87,7 +88,8 @@ describe('a flag on an affidavit field', () => {
     const c = await fx.candidateWithAffidavit(WARD_A.id);
     const id = await flag(c.candidateId, 'assets');
     const res = await item(id, curator, fix({ 'status.assets': 'value', movableInr: '1,02,10,000', immovableInr: '3,50,00,000' }));
-    expect(res.status).toBe(400);
+    // A fix that changes nothing is a notice with a 200, not an error.
+    expect(res.status).toBe(200);
     expect(await res.text()).toContain(t('en', 'curator.fix.error.unchanged'));
     expect((await flagRow(id)).status).toBe('pending');
     expect((await fieldRow(c.candidateId, 'assets'))!.checkedBy).toBeNull();
@@ -109,7 +111,7 @@ describe('a flag on an affidavit field', () => {
     const name = c.extraction.identity.name.text!;
     const id = await flag(c.candidateId, 'full_name');
     const res = await item(id, curator, fix({ 'status.full_name': 'value', name: `  ${name}  ` }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     expect(await res.text()).toContain(t('en', 'curator.fix.error.unchanged'));
     expect((await flagRow(id)).status).toBe('pending');
     expect((await fieldRow(c.candidateId, 'full_name'))!.checkedBy).toBeNull();
@@ -176,7 +178,6 @@ describe('a flag on the ward', () => {
   });
 
   const refusedWards: Array<[label: string, wardId: () => string, key: string]> = [
-    ['the ward the candidate is already in', () => String(WARD_A.id), 'curator.fix.error.unchanged'],
     ['a ward that does not exist', () => '99999999', 'curator.fix.error.unknownWard'],
     ['something that is not a number', () => 'north', 'curator.fix.error.unknownWard'],
   ];
@@ -189,6 +190,18 @@ describe('a flag on the ward', () => {
     expect((await db.select().from(schema.candidates).where(eq(schema.candidates.id, c.candidateId)))[0].wardId).toBe(WARD_A.id);
     expect((await flagRow(id)).status).toBe('pending');
   });
+});
+
+it('answers the ward the candidate is already in with a notice and a 200 (nothing changed), flag still pending', async () => {
+  const c = await fx.candidateWithAffidavit(WARD_A.id);
+  const id = await flag(c.candidateId, 'ward');
+  const res = await item(id, curator, fix({ wardId: String(WARD_A.id) }));
+  expect(res.status).toBe(200);
+  const html = await res.text();
+  expect(html).toContain(t('en', 'curator.fix.error.unchanged'));
+  expect(html).toContain('role="status"');
+  expect((await db.select().from(schema.candidates).where(eq(schema.candidates.id, c.candidateId)))[0].wardId).toBe(WARD_A.id);
+  expect((await flagRow(id)).status).toBe('pending');
 });
 
 describe('the source a reporter gave', () => {
@@ -232,6 +245,39 @@ describe('flags that cannot be fixed here', () => {
     expect(res.status).toBe(400);
     expect(await fieldRow(candidateId, 'age')).toBeUndefined();
     expect((await item(id, curator, tokenForm(curator, { formAction: 'reject', reason: 'No affidavit on file yet' }))).status).toBe(302);
+    expect((await flagRow(id)).status).toBe('rejected');
+  });
+});
+
+describe('an "Other" flag', () => {
+  const other = async (candidateId: number) =>
+    (await submitPublicFlag(anonReporter(), { targetType: 'candidate_other', targetRef: `candidate:${candidateId}:other`, detail: 'This affidavit is of a different person' })).flagItemId!;
+
+  it('is listed with the candidate and the Other label', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    const id = await other(c.candidateId);
+    const html = await (await run(QueueIndexRoute, '/curator/queue', { auth: curator })).text();
+    expect(html).toContain(`href="/curator/queue/${id}"`);
+    expect(html).toContain(t('en', 'flag.modal.otherLabel'));
+  });
+
+  it('shows the report and the affidavit but no fix form, and points to the candidate editor', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    const html = await (await item(await other(c.candidateId), curator)).text();
+    expect(html).toContain('This affidavit is of a different person');
+    expect(html).toContain(t('en', 'flag.modal.otherLabel'));
+    expect(html).toContain(t('en', 'curator.fix.otherDismissOnly'));
+    expect(html).toContain(`href="/curator/candidate/${c.candidateId}"`);
+    expect(html).toContain(t('en', 'curator.fix.otherEditorLink'));
+    expect(html).not.toContain('value="fix"');
+    expect(html).toContain('value="reject"');
+  });
+
+  it('refuses a fix posted anyway, and can be dismissed', async () => {
+    const c = await fx.candidateWithAffidavit(WARD_A.id);
+    const id = await other(c.candidateId);
+    expect((await item(id, curator, fix({ 'status.age': 'value', age: '41' }))).status).toBe(400);
+    expect((await item(id, curator, tokenForm(curator, { formAction: 'reject', reason: 'Checked: same person' }))).status).toBe(302);
     expect((await flagRow(id)).status).toBe('rejected');
   });
 });

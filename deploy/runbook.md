@@ -10,6 +10,8 @@ needs, and the handful of admin actions that only make sense against a live
 deployment (rollback). Exact
 commands, not prose — copy-paste, adjusting the bracketed placeholders.
 
+**Reaching the box:** `ssh bengaluruvotes-vps` (an alias in your `~/.ssh/config`; it carries the user, key and pinned host key). Use it for every command below that runs on the VPS.
+
 **Production is the only environment.** Staging was retired on 2026-09-18 and
 removed from the repo on 2026-10-13 (`docs/architecture.md` §14.2). The
 "Current state" record at the end still describes the 2026-08-13 cutover,
@@ -330,8 +332,7 @@ COMPOSE="docker compose -p bengaluru-votes-production -f deploy/compose.producti
 $COMPOSE run --rm app npm run migrate
 ```
 
-Wards first — everything else depends on them. `seed:wards` also upserts the
-five bilingual candidate questions for every ward.
+Wards first — everything else depends on them.
 
 ```sh
 # Production: the real 369 wards, then the first admin.
@@ -343,7 +344,9 @@ $COMPOSE run --rm app npm run seed:admin -- <admin-email>
 ```
 
 `scripts/seed-admin.ts` upserts a `users` row with `role='admin'` for that
-email — idempotent, safe to re-run. It is the root of the authorization
+email — idempotent, safe to re-run. It also prints a generated sign-in
+password **once** (only if the account has none): save it, or see "Staff
+passwords" below to set another. It is the root of the authorization
 chain: every later role grant is an admin action in `/admin`, itself
 audit-logged, and role is never inferred from the authenticating address
 anywhere else in this app.
@@ -404,8 +407,8 @@ image is currently `:latest` (by then the new stack's own build) as
 `:previous`, and from that point on the tag means the new stack's rollback
 anchor, not the interim stack's. Telling the two apart reliably costs more
 than it saves — one small leftover image is nothing on a 193 GB disk, so
-leave it. **Never `docker image prune` here either, or casually at any
-later point** — `:previous` is the only rollback anchor either new stack
+leave it. **Never `docker image prune -a` here either, or casually at any
+later point** (plain `docker image prune`, dangling images only, runs at the end of every deploy and is safe) — `:previous` is the only rollback anchor either new stack
 has (there is no registry — architecture §14.3), and pruning "unused"
 images is exactly how a rollback stops being possible.
 
@@ -428,8 +431,8 @@ here in the same PR.
 | `DATABASE_URL` | yes | `postgres://<user>:<pass>@postgres:5432/<db>` — must match the `POSTGRES_*` values below. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | yes | Read by the `postgres:16` image itself to initialize, and by its healthcheck (`pg_isready -U ... -d ...`). Keep in sync with `DATABASE_URL`. |
 | `SITE_ORIGIN` | yes | `https://bengaluruvotes.opencity.in` — same-origin check in `src/middleware.ts` for unsafe methods, and CSP/absolute-URL building. |
+| `STAFF_PASSWORD` | CLI only — never in `.env.production` | Read by `npm run set-password` (`scripts/set-password.ts`) to choose the password instead of generating one. Pass it with `run -e STAFF_PASSWORD`; the app does not read it. |
 | `SESSION_SECRET` | yes | 32+ random bytes (e.g. `openssl rand -hex 32`). HMACs session cookies (`src/lib/session.ts`). App refuses to start without it when `NODE_ENV=production`. |
-| `MASTER_PASSWORD` | yes — the only staff sign-in | `src/lib/master-login.ts`. `/login` takes an existing active staff account's email plus this password; anyone holding it can sign in as **any existing active staff account**. Unset or empty means nobody can sign in. Generate with `openssl rand -hex 16`; avoid `#`, `$` and quotes, which env files can mangle. Shared by everyone who has it: removing one person means rotating it for all (or removing their account at `/admin/users`). **A value shorter than 16 characters makes EVERY page fail, public pages and `/healthz` included.** `false`, `0` and `off` are just (too short) passwords. Sign-in posts are limited to 5 a minute per client, and the excess gets a 429. |
 | `GOOGLE_GEOCODING_API_KEY` | yes — the ONLY path to a ward | Google Geocoding API. Pincode lookup was removed 2026-08-14, so this is the sole path from an address to a ward, with no fallback. Unset (or Google unreachable) means every lookup returns `unavailable`. |
 | `GEOCODE_DAILY_BUDGET` | recommended | Daily geocode call cap (architecture §13 cost-amplification guard). **Exhausting it now takes ward lookup DOWN** — pincode lookup was removed 2026-08-14 and there is no fallback left. Default 2000/day. |
 | `ELECTORAL_API_ORIGIN` | optional | Origin of the BBMP electoral API behind booth-lookup-by-EPIC (`src/lib/electoral-api.ts`). Defaults to `https://electoralapi.bbmpgov.in`. **There is no key** — it is a public, unauthenticated endpoint, so there is nothing to omit and no "unset degrades to a no-op" case here; override it only to point staging or a test at something else. |
@@ -446,22 +449,23 @@ here in the same PR.
 | `GA_MEASUREMENT_ID` | production only — `G-PZQJ1ZSCN0` | Google Analytics — gates the one inline GA script tag in `Base.astro`; unset means GA is simply absent (no error). Set on production 2026-08-14; set only in `.env.production`, so local traffic never enters the property. The id is public (it ships in the HTML), so it lives here rather than in a credential store. Read at request time — changing it needs a container recreate, not a rebuild. |
 | `IMAGE_TAG` | optional, not stored in the `.env` file | Selects which **local** image tag the stack runs (`deploy/compose.production.yml`'s `${IMAGE_TAG:-latest}`). Left unset for a normal deploy; it exists so a rollback can point the stack at `:previous` without rebuilding. |
 
-### Rotating the master password
+### Staff passwords
 
-Rotate (also how you remove one person's access, besides removing their account at `/admin/users`):
+Every staff account has its own password (`users.password_hash`); there is no shared password and no env variable for one. An admin sets or replaces anyone's at `/admin/users` (Set password on the account's row, or the optional password field when adding a user), which also signs that person out everywhere. Share it out of band. Minimum 16 characters. An account with no password cannot sign in; the list marks it "No password".
 
-1. `openssl rand -hex 16`, and put the new value in `MASTER_PASSWORD` in `.env.production`.
-2. Restart the app:
+From the server (the first admin, or if every admin is locked out):
 
-   ```sh
-   cd /root/src/bengaluru-votes-production
-   export PROD_ENV_FILE=/etc/bengaluru-votes/.env.production
-   COMPOSE="docker compose -p bengaluru-votes-production -f deploy/compose.production.yml"
-   $COMPOSE up -d app
-   ```
+```sh
+cd /root/src/bengaluru-votes-production
+export PROD_ENV_FILE=/etc/bengaluru-votes/.env.production
+COMPOSE="docker compose -p bengaluru-votes-production -f deploy/compose.production.yml"
+# Generates a password and prints it once:
+$COMPOSE run --rm app npm run set-password -- <email>
+# Or choose it (kept out of shell history if you read it from a prompt or file):
+$COMPOSE run --rm -e STAFF_PASSWORD app npm run set-password -- <email>
+```
 
-3. Verify: `curl -fsS https://bengaluruvotes.opencity.in/healthz`. A value shorter than 16 characters makes EVERY page fail, public pages and `/healthz` included, and `up -d app` does not check health for you. If the check fails, fix the line and repeat step 2.
-4. Share the new value out of band. Existing sessions stay valid for up to an hour of activity; to end them now, ban and reactivate the account at `/admin/users`, or rotate `SESSION_SECRET`, which signs everyone out.
+**The deploy that introduced per-staff passwords removed `MASTER_PASSWORD`: until each staff account has a password nobody can sign in.** Right after that deploy, run `set-password` for the admin, sign in at `/login`, then set the curators' and transcribers' at `/admin/users`.
 
 First admin on a fresh box (same preamble as step 2 above):
 
@@ -472,7 +476,7 @@ COMPOSE="docker compose -p bengaluru-votes-production -f deploy/compose.producti
 $COMPOSE run --rm app npm run seed:admin -- <email>
 ```
 
-Then sign in at `/login` with that email and the master password.
+`seed:admin` prints a generated password once (only when the account has none). Sign in at `/login` with that email and password.
 
 ---
 
@@ -482,6 +486,8 @@ Deploys are **automatic** (`docs/architecture.md` §14.4, revised 2026-11-04).
 Merge a PR to `main`: `ci.yml` must pass, then `deploy.yml` tags, installs the
 env file from the GitHub `production` environment, and runs
 `deploy/deploy.sh`. Failures roll back, and GitHub emails whoever triggered the run.
+A push that changes only docs, tests or CI config is skipped (no gate, no deploy);
+use Run workflow → `deploy-head` to ship such a commit anyway.
 
 Manual actions: GitHub Actions → deploy → Run workflow
 (`redeploy-current`, `deploy-tag`, `rollback`). By hand from a laptop,
@@ -532,6 +538,15 @@ uses a bare `proxy_pass http://app:4321`, which nginx resolves at config-load
 time, so off-network the test fails with "host not found in upstream" and
 tells you nothing about your actual change.
 
+Two responses are worth a look after a deploy that touches this area: `curl -sI https://<host>/data/gba.geojson` should report
+`content-type: application/geo+json` (`.geojson` is not in nginx's stock
+`mime.types`, so `location /data/gba.geojson` sets `default_type`; without it
+the file goes out as `application/octet-stream`), and `curl -s
+https://<host>/robots.txt` should list `Disallow: /curator`, `/admin`,
+`/transcribe` and `/api` without a trailing slash (the app writes that file,
+not nginx). The static volume is only for the file's *content*; a change to
+this config needs no `static-init` run.
+
 ### What the script does, and why each step is there
 
 1. **Preflight** — ssh reachable, the tree exists and is clean, the env file
@@ -560,6 +575,15 @@ curl -sS -X POST https://<host>/api/ward-lookup \
   -H 'content-type: application/json' -H 'Origin: https://<host>' \
   -d '{"address":"MG Road, Bengaluru"}'   # 403 here means rebuild
 ```
+
+9. **Prune, after a verified deploy only.** `docker image prune -f` (dangling
+   images only, so `:latest`, `:previous` and anything a container uses are
+   never touched) and `docker builder prune -f --filter until=168h` (build
+   cache older than a week). Without this each deploy leaves ~1 GB of
+   untagged image and the build cache grew to 24 GB (cleaned 2026-11-06). A
+   failed prune never fails or rolls back the deploy. The box also hosts other
+   stacks; the prune is Docker-wide but dangling-only, and their volumes are
+   never pruned.
 
 ---
 
@@ -703,8 +727,8 @@ $C stop extract-worker         # stops claiming, lets calls in flight finish
   restart, re-run `static-init`) and then re-verifies with a real POST —
   prefer it over the by-hand commands above. Either path depends on
   `:previous` still existing **on the box** — there is no registry to fall
-  back on (architecture §14.3). Tag it before every deploy, and don't `docker image
-  prune` without checking what you're about to delete.
+  back on (architecture §14.3). Tag it before every deploy, and never run
+  `docker image prune -a` or `docker system prune -a`.
 
 ---
 
@@ -773,12 +797,12 @@ Production Compose sets `FLAGS_TRUST_PROXY=true`. nginx overwrites `X-Flag-Clien
 | Variable | Default | Meaning |
 |---|---|---|
 | `FLAGS_SUBMISSIONS_PAUSED` | unset | Exactly `true` rejects new report/receipt requests with 503; curator work and reading continue. |
-| `FLAGS_REPORTER_BURST_LIMIT` | 3 | New accepted reports per browser and account in rolling 10 minutes. |
-| `FLAGS_REPORTER_DAILY_LIMIT` | 10 | New accepted reports per browser and account in rolling 24 hours. |
+| `FLAGS_REPORTER_BURST_LIMIT` | 10 | Accepted submissions per browser in rolling 10 minutes. One submission (however many fields it reports) counts once. At or above the daily limit, the daily limit governs. |
+| `FLAGS_REPORTER_DAILY_LIMIT` | 10 | Accepted submissions per browser in rolling 24 hours. |
 | `FLAGS_NETWORK_DAILY_LIMIT` | 100 | New accepted reports per hashed network address in rolling 24 hours. |
 | `FLAGS_CAPTCHA_MIN_SCORE` | 0.5 | Server-verified minimum score (0–1). |
 
-nginx independently limits receipt initialization and submission together to 10 requests/minute/IP with burst 5 and a 32 KiB request body. The application also limits these requests to 15 per minute bucket before CAPTCHA. Shared mobile/apartment networks can hit these limits; monitor refusals and adjust using observed legitimate traffic. Do not impose a small global report cap or automatically rank candidates by complaints.
+nginx independently limits receipt initialization and submission together to 10 requests/minute/IP with burst 5 and a 128 KiB request body. The application also limits these requests to 15 per minute bucket before CAPTCHA. Shared mobile/apartment networks can hit these limits; monitor refusals and adjust using observed legitimate traffic. Do not impose a small global report cap or automatically rank candidates by complaints.
 
 Siva/admin should inspect the `/admin` report counters and oldest pending report during rollout; curators inspect grouped reports and prior reviews. A warning appears when the current UTC hour has at least 20 accepted reports and exceeds three times the preceding hour's count. This is a local dashboard warning, not an outbound alert. Counters exclude submitted text, links and identifiers.
 

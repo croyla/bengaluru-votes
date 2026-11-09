@@ -3,44 +3,44 @@ title: Privacy policy
 description: How Bengaluru Votes handles ward lookups, anonymous contributions, cookies and technical data.
 ---
 
-*Last updated: 2 November 2026*
+*Last updated: 7 November 2026*
 
-Bengaluru Votes is operated by **Oorvani Foundation**. Citizens can use the site, vote on ward issues and report candidate-data errors without registering or providing a name, email address or phone number. We do not offer citizen accounts or email/WhatsApp subscriptions. Login is for authorised staff only.
+**Oorvani Foundation** runs Bengaluru Votes. You can browse, vote on ward issues and report errors without giving your name, email address or phone number. There are no accounts for citizens. We do not send email or WhatsApp updates. Only approved staff can sign in.
 
-Using the site still involves limited data processing, described below. We do not sell visitor data.
+We collect some data when you use the site, as set out below. We do not sell your data.
 
 ## Finding your ward
 
-When you type an address, Google services provide address suggestions and look up its location. We store the normalized address and resulting ward to speed up repeated searches, without linking that record to a citizen account. Please enter a place or address, not your name or contact details.
+Google suggests addresses and finds the place you type. We put the address in a standard form and save it with its ward. This speeds up repeat searches. This record is not linked to a citizen account. Enter only a place or address, without your name or contact details.
 
-If you choose **use my current location**, your browser asks permission and sends us your coordinates to identify your ward. We use those coordinates for that lookup, then discard them; we do not store or log them or send them to Google. Embedded Google maps separately connect your browser to Google.
+If you choose **use my current location**, your browser asks to send us your exact position. We use it to find your ward, then discard it. We do not store or log your position, or send it to Google. Maps on the site make their own link from your browser to Google.
 
 ## Issue votes and error reports
 
-- **Issue votes:** we store your three choices and a hash of a random browser receipt. The receipt cookie lasts up to one year and lets your browser see its choices and results while preventing another ballot. The ballot record is not linked to your name, contact details, account or IP address. Public results are aggregate counts and percentages.
-- **Candidate-error reports:** we store your explanation and any suggested correction or source link for private curator review. Please do not include personal or sensitive information about yourself or others. Reports do not automatically change candidate information, and anonymous reporters receive submission confirmation only.
-- **Abuse prevention:** reporting uses a random browser cookie, hashed browser identifiers and keyed hashes of IP addresses to limit spam and duplicate submissions. These are technical identifiers, not proof of a person's identity.
+- **Issue votes:** we save your three choices and a hash (a coded version) of a random browser receipt. The receipt cookie lasts up to one year. It lets you see your choices and results, and stops a second vote. Your ballot is not linked to your name, contact details, account or IP address. Results show counts and the share of ballots that chose each issue.
+- **Error reports:** we save your text, suggested fix and source link. Curators check these in private. Do not share private or sensitive details about yourself or others. A report does not change the page by itself. We tell you that we have received it, but do not send you a reply about the review.
+- **Spam checks:** we use a random browser cookie and coded IDs to limit spam and repeat reports. We hash the browser IDs and use a key to hash IP addresses. These codes do not prove who a person is.
 
 ## Cookies, Google services and logs
 
-We use **Google Analytics** to understand site usage, **Google Maps and address lookup** to help find wards, and **Google reCAPTCHA** to protect submissions. These services may receive browser/device information, IP addresses and usage information, and use cookies. Google's processing is described in its [Privacy Policy](https://policies.google.com/privacy) and [information about partner sites](https://policies.google.com/technologies/partner-sites). reCAPTCHA is subject to Google's [Privacy Policy](https://policies.google.com/privacy) and [Terms of Service](https://policies.google.com/terms).
+We use **Google Analytics** to learn how people use the site. **Google Maps and address lookup** help find wards. **Google reCAPTCHA** helps stop spam. These services may use cookies. They may receive your IP address, facts about your browser and device, and details of your use of the site. Read how Google uses data in its [Privacy Policy](https://policies.google.com/privacy) and [guide to partner sites](https://policies.google.com/technologies/partner-sites). Its [Privacy Policy](https://policies.google.com/privacy) and [Terms of Service](https://policies.google.com/terms) apply to reCAPTCHA.
 
-Staff login uses a session cookie. Our hosting infrastructure and application record technical information for operation and security; server logs may include IP addresses, requested URLs, referral URLs, browser information and timestamps.
+Staff login uses a session cookie. Our servers and app keep logs to run and secure the site. Logs may include IP addresses, pages requested, referring pages, browser details and times.
 
-Service providers supporting hosting and these features process the data needed to provide them. Google may process data outside India. We may also disclose information when required by law. We do not use Sentry for error reporting.
+The firms that host the site or provide these services use the data they need for that work. Google may use data outside India. We may share data when the law requires it. We do not use Sentry to track errors.
 
 ## How long information stays
 
-The report cookie and report browser identifiers expire after 30 days; report-related network hashes expire after 48 hours. Duplicate-detection fingerprints for closed reports expire seven days after closure. Aggregate abuse counters are retained for 30 days. Expired server-side abuse metadata is removed by the next daily cleanup.
+The report cookie and browser IDs expire after 30 days. Network hashes for reports expire after 48 hours. Codes used to find repeat reports expire seven days after a report closes. We keep spam counts for 30 days. Each day, a cleanup task deletes spam-check data whose time has run out.
 
-These limits do not delete report content, ballots, address-to-ward lookup records or ordinary server logs. Those records currently have no fixed automatic deletion period. Cookie expiry does not itself delete the corresponding database record. Google's retention is governed by its service policies and settings.
+There is no set time to delete report text, votes, saved address searches or normal server logs. These records are not erased just because a cookie expires. Google keeps data under its own rules and settings.
 
 ## Your choices and contacting us
 
-You can decline browser location permission and type a place or address instead. Browser settings let you block or clear cookies; this may prevent submissions or remove access to your previous voting receipt. Clearing cookies does not delete records already stored by us or Google. Google also provides [Analytics opt-out tools](https://tools.google.com/dlpage/gaoptout).
+You can refuse to share your location and type an address instead. You can block or clear cookies in your browser. This may stop you from sending reports or votes, or from using your old vote receipt. Clearing cookies does not delete records held by us or Google. Google provides [Analytics opt-out tools](https://tools.google.com/dlpage/gaoptout).
 
-For privacy questions, complaints, or requests to access, correct or delete information you believe we hold about you, email **[sivaramakrishnan.n@oorvani.in](mailto:sivaramakrishnan.n@oorvani.in)**. We will assess requests under applicable law. Because anonymous contributions have no contact identity, we may be unable to identify a record as yours. If you email us, we receive your email address and message and use them to handle your enquiry.
+To ask about privacy, make a complaint, or ask to see, fix or delete your data, email **[sivaramakrishnan.n@oorvani.in](mailto:sivaramakrishnan.n@oorvani.in)**. We review requests under the law that applies. We may not be able to tell which anonymous vote or report is yours. We use your email address and message to reply to you.
 
 ## Changes and language
 
-We will publish changes here and update the date above. This policy is available in English and Kannada; the English version controls if the versions differ.
+We will publish changes here and update the date above. This policy is in English and Kannada. If they differ, the English text applies.

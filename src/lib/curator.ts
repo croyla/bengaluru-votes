@@ -80,7 +80,7 @@ export function parseCandidateFieldTargetRef(targetRef: string): { candidateId: 
 
 /** What a queue row is about, in words: the candidate's field for today's flags, the raw reference for rows older than the eight-field rule. */
 export function flagFieldKey(targetType: FlagTargetType, targetRef: string): string | null {
-  return targetType === 'candidate_field' ? (parseCandidateFieldTargetRef(targetRef)?.fieldKey ?? null) : null;
+  return targetType === 'candidate_field' || targetType === 'candidate_other' ? (parseCandidateFieldTargetRef(targetRef)?.fieldKey ?? null) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +148,7 @@ export async function loadQueueList(sort: QueueSort = 'recent', page = 1): Promi
     .orderBy(sort === 'ward' ? wards.nameEn : desc(flagItems.createdAt),desc(flagItems.id)).limit(50).offset((Math.max(1,Math.min(10000,Math.trunc(page)||1))-1)*50);
 
   // The candidate is named only inside `target_ref`, so the names come from a second query.
-  const targets = rows.map((row) => (row.targetType === 'candidate_field' ? parseCandidateFieldTargetRef(row.targetRef) : null));
+  const targets = rows.map((row) => (row.targetType === 'candidate_field' || row.targetType === 'candidate_other' ? parseCandidateFieldTargetRef(row.targetRef) : null));
   const candidateIds = [...new Set(targets.flatMap((target) => (target ? [target.candidateId] : [])))];
   const named = candidateIds.length
     ? await db.select({ id: candidates.id, nameEn: candidates.nameEn }).from(candidates).where(inArray(candidates.id, candidateIds))
@@ -190,6 +190,8 @@ export interface QueueItemDetail {
   resolutionReason: string | null;
   createdAt: Date;
   submissions: FlagSubmissionRow[];
+  /** Every report on this flag, not only this page's: the "of M" in "Report N of M". */
+  totalSubmissions: number;
   page: number;
   hasMore: boolean;
   priorResolutions: { id: number; status: FlagStatus; reason: string | null; resolvedAt: Date | null }[];
@@ -238,10 +240,12 @@ export async function loadQueueItem(id: number, page = 1): Promise<QueueItemDeta
     .where(eq(flagSubmissions.flagItemId, id))
     .orderBy(flagSubmissions.createdAt,flagSubmissions.id).limit(21).offset((page-1)*20);
 
+  const [{ count: totalSubmissions }] = await db.select({ count: sql<number>`count(*)::int` }).from(flagSubmissions).where(eq(flagSubmissions.flagItemId, id));
+
   let candidate: FixCandidate | null = null;
   let fieldKey: string | null = null;
   let fix: QueueItemDetail['fix'] = { kind: 'none' };
-  const parsed = item.targetType === 'candidate_field' ? parseCandidateFieldTargetRef(item.targetRef) : null;
+  const parsed = item.targetType === 'candidate_field' || item.targetType === 'candidate_other' ? parseCandidateFieldTargetRef(item.targetRef) : null;
   if (parsed) {
     candidate = await loadFixCandidate(parsed.candidateId);
     fieldKey = parsed.fieldKey;
@@ -255,7 +259,7 @@ export async function loadQueueItem(id: number, page = 1): Promise<QueueItemDeta
 
   const priorResolutions = await db.select({ id:flagItems.id,status:flagItems.status,reason:flagItems.resolutionReason,resolvedAt:flagItems.resolvedAt }).from(flagItems)
     .where(and(eq(flagItems.targetRef,item.targetRef),sql`${flagItems.status}<>'pending'`,sql`${flagItems.id}<>${id}`)).orderBy(desc(flagItems.resolvedAt)).limit(5);
-  return { ...item, submissions:submissions.slice(0,20), page,hasMore:submissions.length>20,priorResolutions,candidate,fieldKey,fix };
+  return { ...item, submissions:submissions.slice(0,20), totalSubmissions, page,hasMore:submissions.length>20,priorResolutions,candidate,fieldKey,fix };
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +362,25 @@ export interface CandidateEditData {
   /** The seven affidavit fields as their forms open; empty when there is no affidavit. */
   fields: FixField[];
   affidavits: CandidateAffidavitRow[];
+}
+
+/**
+ * Whether the candidate was written to within the last `windowMs`: a field
+ * published (which stamps that field row; only a name or party also stamps the
+ * candidate) or a ward move (which stamps the candidate). Backs the
+ * "Saved and published" notice, which must be true rather than read off the
+ * query string.
+ */
+export async function wasEditedRecently(candidateId: number, windowMs: number): Promise<boolean> {
+  const [row] = await db
+    .select({
+      // Both columns are UTC `timestamp`s without a zone; render the later one as an ISO instant to parse it as UTC.
+      // (Written out with table names: drizzle drops them from a single-table select, which would make `id` below mean the field row's.)
+      editedAt: sql<string | null>`to_char(greatest(candidates.updated_at, (select max(candidate_fields.updated_at) from candidate_fields where candidate_fields.candidate_id = candidates.id)), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
+    })
+    .from(candidates)
+    .where(eq(candidates.id, candidateId));
+  return !!row?.editedAt && Date.now() - new Date(row.editedAt).getTime() < windowMs;
 }
 
 /** Loads everything `/curator/candidate/{id}` needs to render: the candidate's core row (+ ward name) and its seven affidavit fields as the structured forms open them. `null` when no such candidate exists — the route twin turns that into a 404. */
